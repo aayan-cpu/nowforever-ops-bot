@@ -34,7 +34,7 @@ def extract_chat_event(event: dict) -> dict:
     Supports both traditional Chat API format and Workspace Add-on (gsuiteaddons) format.
     """
     import sys
-    print(f"[raw_event] {json.dumps(event)[:800]}", flush=True)
+    print(f"[raw_event] {json.dumps(event)[:3000]}", flush=True)
     sys.stdout.flush()
 
     # Workspace Add-on wraps everything under event["chat"]
@@ -42,10 +42,16 @@ def extract_chat_event(event: dict) -> dict:
     if chat_wrapper:
         event = {**event, **chat_wrapper}
 
-    event_type = event.get("type") or event.get("eventType") or "MESSAGE"
-    message_obj = event.get("message") or {}
-    space_obj = event.get("space") or message_obj.get("space") or {}
+    # Add-on uses messagePayload.message, not message directly
+    message_payload = event.get("messagePayload") or {}
+    message_obj = message_payload.get("message") or event.get("message") or {}
+    space_obj = message_payload.get("space") or event.get("space") or message_obj.get("space") or {}
     user_obj = event.get("user") or message_obj.get("sender") or event.get("sender") or {}
+
+    event_type = (
+        "MESSAGE" if message_payload or event.get("message")
+        else event.get("type") or event.get("eventType") or "MESSAGE"
+    )
 
     text = (
         event.get("text")
@@ -275,7 +281,13 @@ def handle_google_chat_event(event: dict, db_path: str = DB_PATH) -> dict:
     # Unwrap Workspace Add-on envelope
     if "chat" in event:
         event = {**event, **event["chat"]}
-    event_type = event.get("type") or event.get("eventType") or "MESSAGE"
+    # Add-on: MESSAGE = has messagePayload, ADDED_TO_SPACE = has addedToSpacePayload
+    if event.get("messagePayload"):
+        event_type = "MESSAGE"
+    elif event.get("addedToSpacePayload"):
+        event_type = "ADDED_TO_SPACE"
+    else:
+        event_type = event.get("type") or event.get("eventType") or "MESSAGE"
     if event_type == "ADDED_TO_SPACE":
         space = event.get("space", {})
         name = space.get("displayName") or space.get("name") or "this space"
