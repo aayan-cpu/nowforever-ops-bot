@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NowAndForever Ops Bot</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d1117; color: #e6edf3; line-height: 1.6; }
+    header { background: linear-gradient(135deg, #1a1f2e 0%, #0d1117 100%); border-bottom: 1px solid #30363d; padding: 60px 24px 50px; text-align: center; }
+    .badge { display: inline-block; background: #238636; color: #fff; font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 20px; margin-bottom: 18px; letter-spacing: 0.5px; text-transform: uppercase; }
+    header h1 { font-size: 2.6rem; font-weight: 700; color: #fff; margin-bottom: 12px; }
+    header h1 span { color: #58a6ff; }
+    header p { font-size: 1.1rem; color: #8b949e; max-width: 580px; margin: 0 auto; }
+    nav { display: flex; justify-content: center; gap: 32px; padding: 16px 24px; border-bottom: 1px solid #21262d; background: #161b22; }
+    nav a { color: #8b949e; text-decoration: none; font-size: 0.9rem; font-weight: 500; }
+    main { max-width: 900px; margin: 60px auto; padding: 0 24px; }
+    .section-title { font-size: 1.5rem; font-weight: 700; color: #fff; margin-bottom: 24px; padding-bottom: 12px; border-bottom: 1px solid #21262d; }
+    .about p { color: #8b949e; font-size: 1rem; margin-bottom: 14px; }
+    .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 48px 0; }
+    .feature-card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 24px; }
+    .feature-card h3 { font-size: 1rem; font-weight: 600; color: #fff; margin-bottom: 8px; }
+    .feature-card p { font-size: 0.875rem; color: #8b949e; }
+    .company-block { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 32px; margin: 48px 0; }
+    .company-block h2 { font-size: 1.2rem; font-weight: 600; color: #fff; margin-bottom: 16px; }
+    .company-block p { color: #8b949e; font-size: 0.95rem; margin-bottom: 10px; }
+    .meta-table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+    .meta-table td { padding: 10px 14px; font-size: 0.875rem; border-bottom: 1px solid #21262d; color: #8b949e; }
+    .meta-table td:first-child { color: #58a6ff; font-weight: 500; width: 40%; }
+    footer { text-align: center; padding: 40px 24px; border-top: 1px solid #21262d; color: #484f58; font-size: 0.85rem; margin-top: 80px; }
+    footer a { color: #58a6ff; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="badge">Google Chat App</div>
+    <h1>NowAndForever <span>Ops Bot</span></h1>
+    <p>A Jarvis-style AI operations assistant for Now and Forever / Khawar and Sons monitoring 22+ gas station sites across Texas in real time via Google Chat.</p>
+  </header>
+  <nav>
+    <a href="#about">About</a>
+    <a href="#features">Features</a>
+    <a href="#company">Company</a>
+    <a href="privacy.html">Privacy Policy</a>
+    <a href="tos.html">Terms of Service</a>
+  </nav>
+  <main>
+    <section id="about" class="about">
+      <h2 class="section-title">About This Application</h2>
+      <p>NowAndForever Ops Bot is an internal Google Chat application built exclusively for Now and Forever / Khawar and Sons gas station operations. It connects to 22+ Google Chat rooms and provides real-time monitoring, task tracking, and alert detection for field teams across Texas.</p>
+      <p>The bot uses the Google Chat API to receive and respond to messages posted in operational chat rooms. It classifies incoming messages, identifies urgent issues such as gas outages, equipment failures, or power cuts, and automatically creates and tracks operational tasks.</p>
+      <p>This application is not a consumer product. It is an internal operations tool used solely by authorized employees and managers of Now and Forever / Khawar and Sons.</p>
+    </section>
+    <div class="features" id="features">
+      <div class="feature-card">
+        <h3>Real-Time Monitoring</h3>
+        <p>Reads and classifies messages from 22+ Google Chat rooms across all Texas sites, detecting urgent issues as they happen.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Task Tracking</h3>
+        <p>Automatically creates and tracks operational tasks from chat messages, keeping managers aware of open issues across all locations.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Alert Detection</h3>
+        <p>Identifies high-priority alerts such as no gas, power outages, and equipment failures and surfaces them for immediate action.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Google Chat Integration</h3>
+        <p>Responds directly inside Google Chat rooms via the Google Chat API HTTP endpoint, accessible by tagging @NowForever Ops Bot.</p>
+      </div>
+    </div>
+    <div class="company-block" id="company">
+      <h2>About Now and Forever / Khawar and Sons</h2>
+      <p>Now and Forever is a family-run business operating 22+ gas station and convenience store sites across Texas. Khawar and Sons is the operating subsidiary managing day-to-day site operations.</p>
+      <table class="meta-table">
+        <tr><td>Company</td><td>Now and Forever / Khawar and Sons</td></tr>
+        <tr><td>Business</td><td>Gas stations and convenience stores</td></tr>
+        <tr><td>Region</td><td>Texas, USA</td></tr>
+        <tr><td>Sites</td><td>22+ locations</td></tr>
+        <tr><td>Contact</td><td>aayan@khawarsons.com</td></tr>
+      </table>
+    </div>
+  </main>
+  <footer>
+    <p>NowAndForever Ops Bot is an internal application of Now and Forever / Khawar and Sons.<br/>
+    <a href="privacy.html">Privacy Policy</a> | <a href="tos.html">Terms of Service</a></p>
+  </footer>
+</body>
+</html>
