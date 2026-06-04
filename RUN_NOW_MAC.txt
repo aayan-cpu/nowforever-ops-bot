@@ -1,0 +1,11 @@
+Run this exact sequence:
+
+cd ~/Downloads/nowforever-chat-ops-v3
+python3 -m venv .venv
+source .venv/bin/activate
+python -m app.cli dashboard
+python -m app.server
+
+Then open Chrome/Safari:
+http://127.0.0.1:8000/dashboard
+http://127.0.0.1:8000/chat/test

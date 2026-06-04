@@ -1,0 +1,180 @@
+from __future__ import annotations
+
+import re
+import hashlib
+from dataclasses import dataclass
+from typing import Iterable
+
+# v2 rule classifier: lightweight, explainable, no external packages.
+# Goal: catch ops issues reliably before adding AI/Google Chat live mode.
+
+CATEGORY_KEYWORDS = {
+    "daily_shift_report": [
+        r"\bday report\b", r"\bdaily report\b", r"\bshift\s*\d+\b", r"\bclosing report\b", r"\bstore close", r"\btuesday report\b", r"\bmonday report\b", r"\bsaturday report\b"
+    ],
+    "fuel_price_competition": [
+        r"\bgas price\b", r"\bfuel price\b", r"\bcompetitor", r"\bcompetition\b", r"\bgasbuddy\b", r"\bgas buddy\b", r"\bfuel prices?\b",
+        r"\bregular\b.*\bplus\b.*\bsuper\b", r"\bdiesel\b", r"\bprice\b.*\bregular\b"
+    ],
+    "fuel_delivery_issue": [
+        r"\bbol\b", r"\bveeder\b", r"\bverses report\b", r"\bdelivery\b.*\bgas\b", r"\bgas delivery\b", r"\bgallons?\b",
+        r"\bneed gas\b", r"\burgent gas\b", r"\bshort\b.*\bgallon", r"\bless\b.*\bgallon", r"\bturned off\b.*\b(regular|super|gas|fuel)\b",
+        r"\bregular\s+n\s+super\b", r"\bwe need gas\b"
+    ],
+    "deposit_cash_bank": [
+        r"\bdeposit\b", r"\bbank\b", r"\bcash\b", r"\bcheck\b", r"\batm\b", r"\bmoney order\b", r"\breceipt\b"
+    ],
+    "equipment_maintenance": [
+        r"\bnot working\b", r"\bstill not working\b", r"\bbroken\b", r"\brepair\b", r"\btechnician\b", r"\belectrician\b", r"\bac\b", r"\ba\.c\b",
+        r"\bpower\b", r"\bscreen\b", r"\bprinter\b", r"\btickets?\b.*\bnot printing\b", r"\bpump\b", r"\bmachine\b", r"\bremote\b", r"\bswitch\s*board\b",
+        r"\bsewage\b", r"\bsmells?\b", r"\brestroom\b", r"\bice storage\b", r"\blogo\b.*\bremote\b"
+    ],
+    "delivery_order": [r"\bdoordash\b", r"\border\b", r"\bshipment\b", r"\bdelivery received\b"],
+    "sales_issue": [r"\bsales?\s+(are\s+)?low\b", r"\blow sales\b", r"\bnot having power\b"],
+    "admin_request_task": [
+        r"\bplease\b", r"\bpls\b", r"\bsend\b", r"\bupdate\b", r"\bcheck\b", r"\bpost\b", r"\blook into\b", r"\bneed\b", r"\brequired\b",
+        r"\basap\b", r"\bfix\b", r"\bget that checked\b", r"\bcan we\b", r"@\s*admin", r"@\s*Admin", r"@\s*MOIN", r"@\s*Annus"
+    ],
+}
+
+HIGH_PRIORITY_PATTERNS = [
+    r"\basap\b", r"\burgent\b", r"\bneed gas\b", r"\bwe need gas\b", r"\bturned off\b.*\b(regular|super|gas|fuel)",
+    r"\bregular\s+n\s+super\b", r"\belectrician\b", r"\bstill not working\b", r"\bnot working\b", r"\bpower\b.*\b(stopped|out|burned|not)", r"\bnot having power\b",
+    r"\bswitch\s*board\b.*\bburn", r"\bless\b.*\bgallon", r"\bshort\b.*\bgallon", r"\b2500\b", r"\bsewage\b",
+    r"\ba\.c\b.*not working", r"\bac\b.*not working", r"\bgas delivery required\b"
+]
+MEDIUM_PRIORITY_PATTERNS = [r"\bplease\b", r"\bpls\b", r"\bsend\b", r"\bupdate\b", r"\bcheck\b", r"\bpost\b", r"\blook into\b", r"\brequired\b"]
+
+TASK_VERBS = re.compile(r"\b(please|pls|send|update|check|post|look into|fix|call|need|required|turn on|turn off|verify|confirm|send someone|technician|electrician)\b", re.I)
+MENTION_RE = re.compile(r"@\s*([A-Za-z0-9._ -]+)")
+MONEY_RE = re.compile(r"\$\s?\d[\d,]*(?:\.\d{2})?")
+GALLON_RE = re.compile(r"\b\d[\d,]*(?:\.\d+)?\s*gallons?\b", re.I)
+PRICE_RE = re.compile(r"(?<!\d)\d\.\d{2,3}(?!\d)")
+
+# messages that should not create tasks even with attachments
+NO_TASK_PATTERNS = [
+    r"^noted\b", r"^thanks?\b", r"^ok\b", r"^yes\b", r"^done\b", r"^received\b", r"^updated\b", r"^gas delivery received\b"
+]
+
+@dataclass
+class ClassifiedMessage:
+    categories: list[str]
+    priority: str
+    is_task: bool
+    extracted_amounts: list[str]
+    extracted_gallons: list[str]
+    extracted_prices: list[str]
+    assigned_hint: str | None
+    task_title: str
+    fingerprint: str
+    confidence: float
+
+
+def clean_text(text: str) -> str:
+    body = (text or "").replace("\r", "\n")
+    body = re.sub(r"\n{3,}", "\n\n", body)
+    body = re.sub(r"[ \t]+", " ", body)
+    return body.strip()
+
+
+def normalize_sender(sender: str) -> str:
+    s = (sender or "").strip()
+    # Vault update/edit transcript lines sometimes surface as sender="Updated on".
+    # Keep it visible but mark it as synthetic so it can be filtered/de-duped.
+    if s.lower() in {"updated on", "edited on"}:
+        return "[vault-update-record]"
+    return s
+
+
+def make_fingerprint(room_name: str, message: str) -> str:
+    norm = re.sub(r"\s+", " ", (message or "").lower()).strip()
+    norm = norm.replace("verses report", "veeder report")
+    norm = re.sub(r"[^a-z0-9$.,@:/ -]", "", norm)
+    seed = f"{(room_name or '').lower()}|{norm[:500]}"
+    return hashlib.sha1(seed.encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+
+def extract_assignees(body: str) -> str | None:
+    text = body or ""
+    mentions: list[str] = []
+    # Known company mention styles seen in the Vault export. This avoids greedy
+    # captures like "@Admin 4 Ice storage...".
+    known = re.findall(r"@\s*(admin\s*\d+|admin\d+|moin|annus\s+nadeem|ar\s+r)", text, flags=re.I)
+    for k in known:
+        pretty = re.sub(r"\s+", " ", k.strip())
+        pretty = re.sub(r"admin\s*(\d+)", r"Admin \1", pretty, flags=re.I)
+        if pretty.lower() == "moin": pretty = "MOIN"
+        if pretty.lower() == "annus nadeem": pretty = "Annus Nadeem"
+        if pretty.lower() == "ar r": pretty = "AR R"
+        mentions.append("@" + pretty)
+    # Also catch normal one-token @mentions/emails if present.
+    for m in re.findall(r"@\s*([A-Za-z0-9._-]+@[A-Za-z0-9._-]+|[A-Za-z0-9._-]+)", text):
+        cleaned = m.strip(" .,:;\n\t")
+        if cleaned.lower() not in {"admin", "updated", "on"} and not re.fullmatch(r"admin\d+", cleaned, flags=re.I):
+            mentions.append("@" + cleaned)
+    seen = set(); out = []
+    for x in mentions:
+        key = x.lower()
+        if key not in seen:
+            seen.add(key); out.append(x)
+    return ", ".join(out) if out else None
+
+
+def title_from_message(body: str) -> str:
+    one = re.sub(r"\s+", " ", body or "").strip()
+    one = re.sub(r"@\s*[A-Za-z0-9._ -]+", "", one).strip()
+    if not one:
+        return "Attachment/report needs review"
+    return one[:120] + ("..." if len(one) > 120 else "")
+
+
+def classify_message(text: str, attachment_count: int = 0, room_name: str = "") -> ClassifiedMessage:
+    body = clean_text(text)
+    low = body.lower()
+    cats: list[str] = []
+
+    # v2: attachment_report only means "has files"; it should not by itself imply a daily report.
+    if attachment_count:
+        cats.append("attachment_report")
+
+    for cat, patterns in CATEGORY_KEYWORDS.items():
+        if any(re.search(p, low, flags=re.I | re.S) for p in patterns):
+            cats.append(cat)
+
+    if not cats:
+        cats.append("general")
+
+    if any(re.search(p, low, flags=re.I | re.S) for p in HIGH_PRIORITY_PATTERNS):
+        priority = "high"
+    elif any(re.search(p, low, flags=re.I | re.S) for p in MEDIUM_PRIORITY_PATTERNS):
+        priority = "medium"
+    else:
+        priority = "normal"
+
+    no_task = any(re.search(p, low, flags=re.I) for p in NO_TASK_PATTERNS)
+    operational_category = any(c in cats for c in ["admin_request_task", "equipment_maintenance", "fuel_delivery_issue", "sales_issue"])
+    is_task = (bool(TASK_VERBS.search(body)) or priority == "high" or operational_category) and not no_task
+
+    confidence = 0.55
+    if priority == "high": confidence += 0.20
+    if operational_category: confidence += 0.15
+    if extract_assignees(body): confidence += 0.05
+    if attachment_count: confidence += 0.02
+    confidence = min(confidence, 0.98)
+
+    return ClassifiedMessage(
+        categories=sorted(set(cats)),
+        priority=priority,
+        is_task=is_task,
+        extracted_amounts=MONEY_RE.findall(body),
+        extracted_gallons=GALLON_RE.findall(body),
+        extracted_prices=PRICE_RE.findall(body),
+        assigned_hint=extract_assignees(body),
+        task_title=title_from_message(body),
+        fingerprint=make_fingerprint(room_name, body),
+        confidence=round(confidence, 2),
+    )
+
+
+def category_string(cats: Iterable[str]) -> str:
+    return ";".join(cats)
