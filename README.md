@@ -49,7 +49,7 @@ The bot:
 | **Business** | Gas stations (22+ sites) |
 | **Region** | Texas, USA |
 | **Google Cloud Project** | nfchatbot-498419 |
-| **Service Account** | 988358949449-compute@developer.gserviceaccount.com |
+| **Service Account** | 908358949449-compute@developer.gserviceaccount.com |
 | **Admin Email** | aayan@khawarsons.com |
 | **Developer** | Aayan Farooqi ([@aayan-cpu](https://github.com/aayan-cpu)) |
 
@@ -209,7 +209,7 @@ python -m app.server
 | **Project ID** | nfchatbot-498419 |
 | **Region** | us-central1 |
 | **Service Name** | nowforever-chat-ops |
-| **Service Account** | 988358949449-compute@developer.gserviceaccount.com |
+| **Service Account** | 908358949449-compute@developer.gserviceaccount.com |
 
 ### Deploy Command
 
@@ -236,7 +236,7 @@ gcloud run deploy nowforever-chat-ops \
 
 ```zsh
 gcloud projects add-iam-policy-binding nfchatbot-498419 \
-  --member="serviceAccount:988358949449-compute@developer.gserviceaccount.com" \
+  --member="serviceAccount:908358949449-compute@developer.gserviceaccount.com" \
   --role="roles/storage.objectAdmin"
 ```
 
@@ -244,7 +244,7 @@ gcloud projects add-iam-policy-binding nfchatbot-498419 \
 
 ```zsh
 gcloud projects add-iam-policy-binding nfchatbot-498419 \
-  --member="serviceAccount:988358949449-compute@developer.gserviceaccount.com" \
+  --member="serviceAccount:908358949449-compute@developer.gserviceaccount.com" \
   --role="roles/storage.objectAdmin" \
 && gcloud run deploy nowforever-chat-ops \
   --source . \
@@ -268,7 +268,7 @@ After a successful Cloud Run deploy, configure the bot in Google Cloud Console:
 | **App name** | NowForever Ops Bot |
 | **Description** | AI operations bot for Now & Forever gas station task tracking |
 | **Connection type** | HTTP endpoint |
-| **HTTP endpoint URL** | https://YOUR-CLOUD-RUN-URL/chat/events |
+| **HTTP endpoint URL** | https://nowforever-chat-ops-908358949449.us-central1.run.app/chat/events |
 
 3. Save the configuration.
 4. Add the bot to test rooms:
@@ -335,10 +335,10 @@ Deploy to Google Cloud Run. Configure Google Chat API HTTP endpoint. Test live b
 **Phase 2 checklist:**
 - [x] gcloud installed
 - [x] gcloud auth login completed
-- [ ] Fix storage IAM permissions
-- [ ] Cloud Run deploy succeeds
-- [ ] Copy Cloud Run URL
-- [ ] Google Chat API HTTP endpoint configured
+- [x] Fix storage IAM permissions
+- [x] Cloud Run deploy succeeds → https://nowforever-chat-ops-908358949449.us-central1.run.app
+- [x] Copy Cloud Run URL
+- [ ] Google Chat API HTTP endpoint configured (manual step in Cloud Console)
 - [ ] Bot added to All Captains Chat
 - [ ] Bot added to 4 Channelview
 - [ ] Test bot commands in a live room
