@@ -31,8 +31,17 @@ def _get(obj: dict, path: str, default: Any = None) -> Any:
 def extract_chat_event(event: dict) -> dict:
     """Normalize a Google Chat HTTP event into our internal message shape.
 
-    This supports real Google Chat events and simple local test payloads.
+    Supports both traditional Chat API format and Workspace Add-on (gsuiteaddons) format.
     """
+    import sys
+    print(f"[raw_event] {json.dumps(event)[:800]}", flush=True)
+    sys.stdout.flush()
+
+    # Workspace Add-on wraps everything under event["chat"]
+    chat_wrapper = event.get("chat") or {}
+    if chat_wrapper:
+        event = {**event, **chat_wrapper}
+
     event_type = event.get("type") or event.get("eventType") or "MESSAGE"
     message_obj = event.get("message") or {}
     space_obj = event.get("space") or message_obj.get("space") or {}
@@ -263,7 +272,9 @@ def is_direct_message(event: dict) -> bool:
 
 
 def handle_google_chat_event(event: dict, db_path: str = DB_PATH) -> dict:
-    print(f"[chat_event] type={event.get('type')} space={event.get('space')} user={event.get('user')}")
+    # Unwrap Workspace Add-on envelope
+    if "chat" in event:
+        event = {**event, **event["chat"]}
     event_type = event.get("type") or event.get("eventType") or "MESSAGE"
     if event_type == "ADDED_TO_SPACE":
         space = event.get("space", {})
