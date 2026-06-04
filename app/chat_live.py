@@ -12,6 +12,12 @@ from app.reports import dashboard, high_priority, open_tasks, room_summary, task
 
 DB_PATH = "data/ops_bot.sqlite3"
 
+ADMIN_EMAILS = {"aayan@khawarsons.com", "aayan@khawar-sons.com"}
+
+
+def is_admin(sender: str) -> bool:
+    return (sender or "").lower().strip() in ADMIN_EMAILS
+
 
 def _get(obj: dict, path: str, default: Any = None) -> Any:
     cur: Any = obj
@@ -162,9 +168,12 @@ def should_reply(event: dict, c_priority: str | None = None) -> bool:
 def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> str:
     text = msg["message"] or ""
     lower = text.lower()
+    admin = is_admin(msg["sender"])
 
-    # Command-ish requests first.
+    # Admin-only commands.
     if re.search(r"\b(summary|dashboard|what happened)\b", lower):
+        if not admin:
+            return "⛔ Only the admin can run that command."
         d = dashboard(db_path)
         open_count = next((x["count"] for x in d["tasks"] if x["status"] == "open"), 0)
         high_count = next((x["count"] for x in d["priorities"] if x["priority"] == "high"), 0)
@@ -175,6 +184,8 @@ def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> st
         return "\n".join(lines)
 
     if re.search(r"\b(alerts?|urgent)\b", lower):
+        if not admin:
+            return "⛔ Only the admin can run that command."
         alerts = high_priority(db_path, 8)
         if not alerts:
             return "No high-priority alerts found."
@@ -184,6 +195,8 @@ def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> st
         return "\n".join(lines)
 
     if re.search(r"\b(tasks?|open tasks?)\b", lower):
+        if not admin:
+            return "⛔ Only the admin can run that command."
         tasks = open_tasks(db_path, limit=10)
         if not tasks:
             return "No open tasks found."
@@ -194,12 +207,16 @@ def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> st
 
     m = re.search(r"\bclose task\s*(\d+)\b|\bclose\s*(\d+)\b", lower)
     if m:
+        if not admin:
+            return "⛔ Only the admin can close tasks."
         task_id_to_close = int(m.group(1) or m.group(2))
         res = task_action(db_path, task_id_to_close, "close")
         return f"Closed task #{task_id_to_close}." if res.get("ok") else f"Could not close task #{task_id_to_close}: {res.get('error')}"
 
     m = re.search(r"\bassign task\s*(\d+)\s+(.+)$|\bassign\s*(\d+)\s+(.+)$", text, flags=re.I | re.S)
     if m:
+        if not admin:
+            return "⛔ Only the admin can assign tasks."
         task_id_to_assign = int(m.group(1) or m.group(3))
         assignee = (m.group(2) or m.group(4) or "").strip()
         res = task_action(db_path, task_id_to_assign, "assign", assignee)
@@ -207,6 +224,8 @@ def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> st
 
     m = re.search(r"\bshow\s+(.+)$", text, flags=re.I)
     if m:
+        if not admin:
+            return "⛔ Only the admin can run that command."
         room = m.group(1).strip()
         rs = room_summary(db_path, room)
         if not rs.get("stats"):
