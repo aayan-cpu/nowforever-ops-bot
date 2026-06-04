@@ -245,19 +245,23 @@ def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> st
     return "Got it."
 
 
+def is_direct_message(event: dict) -> bool:
+    space = event.get("space") or event.get("message", {}).get("space") or {}
+    return space.get("type") == "DM" or space.get("singleUserBotDm") is True
+
+
 def handle_google_chat_event(event: dict, db_path: str = DB_PATH) -> dict:
     event_type = event.get("type") or event.get("eventType") or "MESSAGE"
     if event_type == "ADDED_TO_SPACE":
         space = event.get("space", {})
         name = space.get("displayName") or space.get("name") or "this space"
-        return google_chat_response(f"NowForever Ops Bot is active in {name}. Mention me for tasks, alerts, summaries, or site status.")
+        return google_chat_response(f"NowAndForeverBot is active in {name}. Send me: summary, alerts, tasks, close task #, assign task #, or show <room>.")
     if event_type == "REMOVED_FROM_SPACE":
-        return {"text": ""}
+        return google_chat_response("")
 
     result = ingest_live_event(event, db_path)
-    # For safety in v3: only answer if mentioned/command-ish or high priority.
-    # This prevents noisy spam in every store room.
     c_priority = result.get("priority")
-    if should_reply(event, c_priority):
-        return google_chat_response(result.get("reply") or "Got it.")
+    # Always reply to DMs. In rooms, only reply if mentioned or high priority.
+    if is_direct_message(event) or should_reply(event, c_priority):
+        return google_chat_response(result.get("reply") or "Got it. Try: summary, alerts, or tasks.")
     return google_chat_response("")
