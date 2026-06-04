@@ -152,8 +152,20 @@ def ingest_live_event(event: dict, db_path: str = DB_PATH) -> dict:
 
 
 def google_chat_response(text: str) -> dict:
-    # Google Chat HTTP apps can return simple JSON with a text field.
-    return {"text": text[:3900]}
+    # Workspace Add-on response format (userAgent: Google-gsuiteaddons)
+    if not text:
+        return {}
+    return {
+        "hostAppDataAction": {
+            "chatDataAction": {
+                "createMessageAction": {
+                    "message": {
+                        "text": text[:3900]
+                    }
+                }
+            }
+        }
+    }
 
 
 def should_reply(event: dict, c_priority: str | None = None) -> bool:
