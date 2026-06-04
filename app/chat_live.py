@@ -251,6 +251,7 @@ def is_direct_message(event: dict) -> bool:
 
 
 def handle_google_chat_event(event: dict, db_path: str = DB_PATH) -> dict:
+    print(f"[chat_event] type={event.get('type')} space={event.get('space')} user={event.get('user')}")
     event_type = event.get("type") or event.get("eventType") or "MESSAGE"
     if event_type == "ADDED_TO_SPACE":
         space = event.get("space", {})
@@ -261,7 +262,9 @@ def handle_google_chat_event(event: dict, db_path: str = DB_PATH) -> dict:
 
     result = ingest_live_event(event, db_path)
     c_priority = result.get("priority")
+    reply = result.get("reply") or "Got it. Try: summary, alerts, tasks, or show <room name>."
     # Always reply to DMs. In rooms, only reply if mentioned or high priority.
     if is_direct_message(event) or should_reply(event, c_priority):
-        return google_chat_response(result.get("reply") or "Got it. Try: summary, alerts, or tasks.")
-    return google_chat_response("")
+        return google_chat_response(reply)
+    # Fallback: always reply so Google Chat doesn't show "not responding"
+    return google_chat_response(reply)
