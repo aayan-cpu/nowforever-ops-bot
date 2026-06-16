@@ -139,9 +139,21 @@ def _req(method: str, path: str, body: dict | None = None, _tries: int = 4) -> d
             raise RuntimeError(f"Firestore {method} {path} network error: {last_err}") from None
 
 
+# Short-lived cache for full-collection reads. A single AI answer makes several
+# report/tool calls that each scanned all messages; this fetches once per window.
+# Writes bust the affected collection so the writer sees fresh data immediately.
+_list_cache: dict = {}
+_LIST_TTL = float(os.getenv("OPS_LIST_CACHE_TTL", "45"))
+
+
+def _bust(collection: str) -> None:
+    _list_cache.pop(collection, None)
+
+
 # ------------------------------------------------------------- public API
 def create(collection: str, data: dict, doc_id: str | None = None) -> dict:
     path = collection + (f"?documentId={urllib.parse.quote(doc_id)}" if doc_id else "")
+    _bust(collection)
     return _from_doc(_req("POST", path, {"fields": _to_fields(data)}))
 
 
@@ -155,10 +167,15 @@ def get(collection: str, doc_id: str) -> dict | None:
 def patch(collection: str, doc_id: str, data: dict) -> dict:
     mask = "&".join(f"updateMask.fieldPaths={urllib.parse.quote(k)}" for k in data)
     path = f"{collection}/{urllib.parse.quote(str(doc_id))}?{mask}"
+    _bust(collection)
     return _from_doc(_req("PATCH", path, {"fields": _to_fields(data)}))
 
 
-def list_all(collection: str) -> list[dict]:
+def list_all(collection: str, use_cache: bool = True) -> list[dict]:
+    if use_cache:
+        hit = _list_cache.get(collection)
+        if hit and (time.time() - hit[0]) < _LIST_TTL:
+            return hit[1]
     out, page = [], ""
     while True:
         q = "pageSize=300" + (f"&pageToken={urllib.parse.quote(page)}" if page else "")
@@ -167,6 +184,7 @@ def list_all(collection: str) -> list[dict]:
         page = res.get("nextPageToken", "")
         if not page:
             break
+    _list_cache[collection] = (time.time(), out)
     return out
 
 
@@ -185,6 +203,7 @@ def find(collection: str, field: str, value, limit: int = 5) -> list[dict]:
 
 
 def delete(collection: str, doc_id: str) -> None:
+    _bust(collection)
     _req("DELETE", f"{collection}/{urllib.parse.quote(str(doc_id))}")
 
 
