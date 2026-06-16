@@ -140,7 +140,6 @@ def store_message(m: dict, room_name: str, room_id: str, seen: set) -> bool:
 def main():
     dry = len(sys.argv) > 1 and sys.argv[1] == "dry"
     app_tok = token("https://www.googleapis.com/auth/chat.bot")
-    user_tok = token("https://www.googleapis.com/auth/chat.messages.readonly", subject=SUBJECT)
     rooms = list_rooms(app_tok)
     # Idempotency: preload data_ids + fingerprints already in Firestore so a
     # re-run resumes/skips instead of duplicating.
@@ -158,6 +157,9 @@ def main():
     for s in rooms:
         name, sid = s.get("displayName") or s["name"], s["name"]
         count = errors = 0
+        # Fresh token per room — the DWD token expires after ~1h and a big room
+        # can outlast one token, which 401'd the rest of the run last time.
+        user_tok = token("https://www.googleapis.com/auth/chat.messages.readonly", subject=SUBJECT)
         for m in list_messages(sid, user_tok):
             if dry:
                 count += 1
