@@ -1,98 +1,113 @@
 from __future__ import annotations
 
 import html
-import sqlite3
 from collections import defaultdict
-from typing import Iterable
+from datetime import datetime, timezone
 
-from app.database import connect
-
-
-def rows_to_dicts(rows: Iterable[sqlite3.Row]) -> list[dict]:
-    return [dict(r) for r in rows]
+from app import store
 
 
-def dashboard(db_path: str = "data/ops_bot.sqlite3") -> dict:
-    with connect(db_path) as conn:
-        totals = dict(conn.execute("SELECT COUNT(*) messages, COALESCE(SUM(attachment_count),0) attachments, SUM(is_duplicate) duplicates FROM messages").fetchone())
-        task_counts = rows_to_dicts(conn.execute("SELECT status, COUNT(*) count FROM tasks GROUP BY status ORDER BY status"))
-        priority_counts = rows_to_dicts(conn.execute("SELECT priority, COUNT(*) count FROM messages GROUP BY priority ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END"))
-        top_rooms = rows_to_dicts(conn.execute("""
-            SELECT room_name, COUNT(*) messages, COALESCE(SUM(attachment_count),0) attachments,
-                   SUM(CASE WHEN priority='high' THEN 1 ELSE 0 END) high,
-                   SUM(CASE WHEN is_task=1 THEN 1 ELSE 0 END) tasks
-            FROM messages GROUP BY room_name ORDER BY messages DESC LIMIT 12
-        """))
-        category_counts = defaultdict(int)
-        for row in conn.execute("SELECT categories FROM messages WHERE COALESCE(is_duplicate,0)=0"):
-            for cat in (row[0] or "general").split(';'):
-                category_counts[cat] += 1
-        return {
-            "totals": totals,
-            "tasks": task_counts,
-            "priorities": priority_counts,
-            "top_rooms": top_rooms,
-            "categories": dict(sorted(category_counts.items(), key=lambda x: x[1], reverse=True)),
+def _sort_recent(rows: list[dict]) -> list[dict]:
+    # Newest first: prefer numeric seq, fall back to created_at / timestamp_raw.
+    return sorted(rows, key=lambda r: (r.get("seq") or 0, r.get("created_at") or r.get("timestamp_raw") or ""), reverse=True)
+
+
+_PRI_RANK = {"high": 0, "medium": 1}
+
+
+def dashboard(db_path: str | None = None) -> dict:
+    messages = store.list_all("messages")
+    tasks = store.list_all("tasks")
+    live = [m for m in messages if not m.get("is_duplicate")]
+
+    totals = {
+        "messages": len(messages),
+        "attachments": sum(m.get("attachment_count") or 0 for m in messages),
+        "duplicates": sum(1 for m in messages if m.get("is_duplicate")),
+    }
+    tc = defaultdict(int)
+    for t in tasks:
+        tc[t.get("status") or "open"] += 1
+    task_counts = [{"status": s, "count": tc[s]} for s in sorted(tc)]
+
+    pc = defaultdict(int)
+    for m in messages:
+        pc[m.get("priority") or "normal"] += 1
+    priority_counts = [{"priority": p, "count": pc[p]}
+                       for p in sorted(pc, key=lambda p: _PRI_RANK.get(p, 2))]
+
+    rooms: dict[str, dict] = {}
+    for m in messages:
+        r = rooms.setdefault(m.get("room_name") or "Unknown", {"room_name": m.get("room_name") or "Unknown", "messages": 0, "attachments": 0, "high": 0, "tasks": 0})
+        r["messages"] += 1
+        r["attachments"] += m.get("attachment_count") or 0
+        r["high"] += 1 if m.get("priority") == "high" else 0
+        r["tasks"] += 1 if m.get("is_task") else 0
+    top_rooms = sorted(rooms.values(), key=lambda r: r["messages"], reverse=True)[:12]
+
+    category_counts = defaultdict(int)
+    for m in live:
+        for cat in (m.get("categories") or "general").split(";"):
+            category_counts[cat] += 1
+    return {
+        "totals": totals,
+        "tasks": task_counts,
+        "priorities": priority_counts,
+        "top_rooms": top_rooms,
+        "categories": dict(sorted(category_counts.items(), key=lambda x: x[1], reverse=True)),
+    }
+
+
+def open_tasks(db_path: str | None = None, room: str | None = None, limit: int = 50, status: str = "open") -> list[dict]:
+    tasks = [t for t in store.list_all("tasks") if (t.get("status") or "open") == status]
+    if room:
+        tasks = [t for t in tasks if room.lower() in (t.get("room_name") or "").lower()]
+    tasks.sort(key=lambda t: (_PRI_RANK.get(t.get("priority"), 2), -(t.get("id") or 0)))
+    return tasks[:limit]
+
+
+def high_priority(db_path: str | None = None, limit: int = 50) -> list[dict]:
+    rows = [m for m in store.list_all("messages")
+            if m.get("priority") == "high" and not m.get("is_duplicate")]
+    return _sort_recent(rows)[:limit]
+
+
+def room_summary(db_path: str | None, room: str) -> dict:
+    needle = (room or "").lower()
+    matched = [m for m in store.list_all("messages") if needle in (m.get("room_name") or "").lower()]
+    stats = None
+    if matched:
+        # Pick the busiest matching room name as the canonical one.
+        by_room: dict[str, list] = defaultdict(list)
+        for m in matched:
+            by_room[m.get("room_name") or "Unknown"].append(m)
+        room_name, msgs = max(by_room.items(), key=lambda kv: len(kv[1]))
+        stats = {
+            "room_name": room_name,
+            "messages": len(msgs),
+            "attachments": sum(m.get("attachment_count") or 0 for m in msgs),
+            "high": sum(1 for m in msgs if m.get("priority") == "high"),
+            "tasks": sum(1 for m in msgs if m.get("is_task")),
         }
+    recent = _sort_recent([m for m in matched if not m.get("is_duplicate")])[:30]
+    tasks = open_tasks(None, room, 30)
+    return {"stats": stats, "open_tasks": tasks, "recent": recent}
 
 
-def open_tasks(db_path: str = "data/ops_bot.sqlite3", room: str | None = None, limit: int = 50, status: str = "open") -> list[dict]:
-    with connect(db_path) as conn:
-        where = ["status=?"]
-        params: list = [status]
-        if room:
-            where.append("room_name LIKE ?")
-            params.append(f"%{room}%")
-        params.append(limit)
-        rows = conn.execute(f"""
-            SELECT id, room_name, priority, category, sender, task_title, task_text, assigned_hint, assignee, status, confidence
-            FROM tasks WHERE {' AND '.join(where)}
-            ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, id DESC LIMIT ?
-        """, params).fetchall()
-        return rows_to_dicts(rows)
-
-
-def high_priority(db_path: str = "data/ops_bot.sqlite3", limit: int = 50) -> list[dict]:
-    with connect(db_path) as conn:
-        rows = conn.execute("""
-            SELECT room_name, timestamp_raw, sender, message, categories, attachment_count, assigned_hint, confidence
-            FROM messages WHERE priority='high' AND COALESCE(is_duplicate,0)=0
-            ORDER BY id DESC LIMIT ?
-        """, (limit,)).fetchall()
-        return rows_to_dicts(rows)
-
-
-def room_summary(db_path: str, room: str) -> dict:
-    with connect(db_path) as conn:
-        stats = conn.execute("""
-            SELECT room_name, COUNT(*) messages, COALESCE(SUM(attachment_count),0) attachments,
-                   SUM(CASE WHEN priority='high' THEN 1 ELSE 0 END) high,
-                   SUM(CASE WHEN is_task=1 THEN 1 ELSE 0 END) tasks
-            FROM messages WHERE room_name LIKE ? GROUP BY room_name ORDER BY messages DESC LIMIT 1
-        """, (f"%{room}%",)).fetchone()
-        recent = rows_to_dicts(conn.execute("""
-            SELECT timestamp_raw, sender, priority, categories, message, attachments, assigned_hint, confidence
-            FROM messages WHERE room_name LIKE ? AND COALESCE(is_duplicate,0)=0
-            ORDER BY id DESC LIMIT 30
-        """, (f"%{room}%",)).fetchall())
-        tasks = open_tasks(db_path, room, 30)
-        return {"stats": dict(stats) if stats else None, "open_tasks": tasks, "recent": recent}
-
-
-def task_action(db_path: str, task_id: int, action: str, assignee: str | None = None) -> dict:
-    with connect(db_path) as conn:
-        row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-        if not row:
-            return {"ok": False, "error": "task not found"}
-        if action == "close":
-            conn.execute("UPDATE tasks SET status='closed', closed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?", (task_id,))
-        elif action == "open":
-            conn.execute("UPDATE tasks SET status='open', closed_at=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?", (task_id,))
-        elif action == "assign":
-            conn.execute("UPDATE tasks SET assignee=?, status='assigned', updated_at=CURRENT_TIMESTAMP WHERE id=?", (assignee or "", task_id))
-        else:
-            return {"ok": False, "error": "unknown action"}
-        return {"ok": True, "task_id": task_id, "action": action, "assignee": assignee}
+def task_action(db_path: str | None, task_id: int, action: str, assignee: str | None = None) -> dict:
+    t = store.get("tasks", task_id)
+    if not t:
+        return {"ok": False, "error": "task not found"}
+    now = datetime.now(timezone.utc).isoformat()
+    if action == "close":
+        store.patch("tasks", task_id, {"status": "closed", "closed_at": now, "updated_at": now})
+    elif action == "open":
+        store.patch("tasks", task_id, {"status": "open", "closed_at": None, "updated_at": now})
+    elif action == "assign":
+        store.patch("tasks", task_id, {"assignee": assignee or "", "status": "assigned", "updated_at": now})
+    else:
+        return {"ok": False, "error": "unknown action"}
+    return {"ok": True, "task_id": task_id, "action": action, "assignee": assignee}
 
 
 def render_text_report(db_path: str = "data/ops_bot.sqlite3") -> str:

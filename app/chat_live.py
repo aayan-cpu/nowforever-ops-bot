@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.classifier import classify_message, category_string, clean_text, normalize_sender
-from app.database import connect, init_db
+from app import store
 from app.ingest import pick_primary_category
 from app.reports import dashboard, high_priority, open_tasks, room_summary, task_action
 
@@ -118,48 +118,44 @@ def extract_chat_event(event: dict) -> dict:
 
 
 def ingest_live_event(event: dict, db_path: str = DB_PATH) -> dict:
-    """Classify + store one Google Chat event. Creates a task if action-worthy."""
-    init_db(db_path)
+    """Classify + store one Google Chat event in Firestore. Creates a task if action-worthy."""
     msg = extract_chat_event(event)
     c = classify_message(msg["message"], msg["attachment_count"], msg["room_name"])
     category = pick_primary_category(c.categories)
 
-    with connect(db_path) as conn:
-        # Avoid creating duplicate tasks if Google retries the same event.
-        existing = conn.execute(
-            "SELECT id FROM messages WHERE data_id=? OR fingerprint=? LIMIT 1",
-            (msg["data_id"], c.fingerprint),
-        ).fetchone()
-        if existing:
-            return {"ok": True, "duplicate": True, "message_id": existing["id"], "reply": build_reply(msg, c, None, db_path)}
+    # Avoid duplicate tasks if Google retries the same event.
+    existing = store.find("messages", "data_id", msg["data_id"], limit=1) or \
+        store.find("messages", "fingerprint", c.fingerprint, limit=1)
+    if existing:
+        return {"ok": True, "duplicate": True, "message_id": existing[0]["id"],
+                "reply": build_reply(msg, c, None, db_path)}
 
-        cur = conn.execute(
-            """
-            INSERT INTO messages (
-                source_idx, room_id, room_name, data_id, sender, timestamp_raw, message,
-                attachments, attachment_count, categories, priority, is_task,
-                extracted_amounts, extracted_gallons, extracted_prices, assigned_hint,
-                fingerprint, confidence, is_duplicate
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                None, msg["room_id"], msg["room_name"], msg["data_id"], msg["sender"], msg["timestamp_raw"], msg["message"],
-                msg["attachments"], msg["attachment_count"], category_string(c.categories), c.priority, 1 if c.is_task else 0,
-                json.dumps(c.extracted_amounts), json.dumps(c.extracted_gallons), json.dumps(c.extracted_prices), c.assigned_hint,
-                c.fingerprint, c.confidence, 0,
-            ),
-        )
-        message_id = cur.lastrowid
-        task_id = None
-        if c.is_task or c.priority == "high":
-            tcur = conn.execute(
-                """
-                INSERT INTO tasks (message_id, room_name, sender, task_title, task_text, category, priority, assigned_hint, assignee, source_fingerprint, confidence)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (message_id, msg["room_name"], msg["sender"], c.task_title, msg["message"][:4000], category, c.priority, c.assigned_hint, c.assigned_hint, c.fingerprint, c.confidence),
-            )
-            task_id = tcur.lastrowid
+    now = datetime.now(timezone.utc).isoformat()
+    message_doc = store.create("messages", {
+        "seq": store.next_seq("messages"),
+        "room_id": msg["room_id"], "room_name": msg["room_name"], "data_id": msg["data_id"],
+        "sender": msg["sender"], "timestamp_raw": msg["timestamp_raw"], "message": msg["message"],
+        "attachments": msg["attachments"], "attachment_count": msg["attachment_count"],
+        "categories": category_string(c.categories), "priority": c.priority,
+        "is_task": bool(c.is_task),
+        "extracted_amounts": json.dumps(c.extracted_amounts),
+        "extracted_gallons": json.dumps(c.extracted_gallons),
+        "extracted_prices": json.dumps(c.extracted_prices),
+        "assigned_hint": c.assigned_hint, "fingerprint": c.fingerprint,
+        "confidence": c.confidence, "is_duplicate": False, "created_at": now,
+    })
+    message_id = message_doc["id"]
+
+    task_id = None
+    if c.is_task or c.priority == "high":
+        task_id = store.next_seq("tasks")
+        store.create("tasks", {
+            "id": task_id, "message_id": message_id, "room_name": msg["room_name"],
+            "sender": msg["sender"], "task_title": c.task_title, "task_text": msg["message"][:4000],
+            "category": category, "priority": c.priority, "assigned_hint": c.assigned_hint,
+            "assignee": c.assigned_hint, "status": "open", "source_fingerprint": c.fingerprint,
+            "confidence": c.confidence, "created_at": now, "updated_at": now,
+        }, doc_id=str(task_id))
 
     return {
         "ok": True,

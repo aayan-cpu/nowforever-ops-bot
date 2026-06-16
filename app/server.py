@@ -5,13 +5,13 @@ import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
-from app.database import init_db
 from app.reports import (
     dashboard, high_priority, open_tasks, room_summary, task_action,
     render_dashboard_html, render_tasks_html, render_alerts_html, render_room_html
 )
 from app.chat_live import handle_google_chat_event, ingest_live_event, google_chat_response
 
+# Kept for backward compat with callers/tests; data now lives in Firestore (app/store.py).
 DB_PATH = os.getenv("OPS_DB_PATH", "data/ops_bot.sqlite3")
 
 
@@ -35,7 +35,6 @@ def send_html(handler: BaseHTTPRequestHandler, html: str, status: int = 200):
 
 class OpsHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        init_db(DB_PATH)
         parsed = urlparse(self.path)
         path = parsed.path
         qs = parse_qs(parsed.query)
@@ -69,7 +68,6 @@ class OpsHandler(BaseHTTPRequestHandler):
             return send_json(self, {"error": str(e)}, 500)
 
     def do_POST(self):
-        init_db(DB_PATH)
         parsed = urlparse(self.path)
         path = parsed.path
         parts = path.strip("/").split("/")
@@ -117,7 +115,6 @@ class OpsHandler(BaseHTTPRequestHandler):
 
 
 def run(host: str | None = None, port: int | None = None):
-    init_db(DB_PATH)
     host = host or os.getenv("HOST", "127.0.0.1")
     port = port or int(os.getenv("PORT", "8000"))
     print(f"Now & Forever Chat Ops v3 running at http://{host}:{port}")
