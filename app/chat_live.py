@@ -280,8 +280,20 @@ def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> st
 
 
 def is_direct_message(event: dict) -> bool:
-    space = event.get("space") or event.get("message", {}).get("space") or {}
-    return space.get("type") == "DM" or space.get("singleUserBotDm") is True
+    # Space can live at top level (classic) or under messagePayload (add-on).
+    mp = event.get("messagePayload") or {}
+    space = (
+        event.get("space")
+        or mp.get("space")
+        or mp.get("message", {}).get("space")
+        or event.get("message", {}).get("space")
+        or {}
+    )
+    return (
+        space.get("type") == "DM"
+        or space.get("spaceType") == "DIRECT_MESSAGE"
+        or space.get("singleUserBotDm") is True
+    )
 
 
 def handle_google_chat_event(event: dict, db_path: str = DB_PATH) -> dict:
