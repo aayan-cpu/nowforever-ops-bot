@@ -150,7 +150,16 @@ def _sa_key_dwd(scope: str, subject: str) -> str | None:
 def get_download_token() -> str | None:
     if _dl_cache["token"] and time.time() < _dl_cache["exp"] - 60:
         return _dl_cache["token"]
-    tok = _signjwt_dwd(DL_SCOPE, DL_SUBJECT) or _sa_key_dwd(DL_SCOPE, DL_SUBJECT)
+    print(f"[dl] start: SA_KEY={SA_KEY} exists={os.path.exists(SA_KEY)}", flush=True)
+    tok = _signjwt_dwd(DL_SCOPE, DL_SUBJECT)
+    print(f"[dl] signjwt -> {'TOKEN' if tok else 'None'}", flush=True)
+    if not tok:
+        try:
+            tok = _sa_key_dwd(DL_SCOPE, DL_SUBJECT)
+        except Exception as e:
+            print(f"[dl] sakey EXC: {e}", flush=True)
+            tok = None
+        print(f"[dl] sakey -> {'TOKEN' if tok else 'None'}", flush=True)
     if tok:
         _dl_cache.update(token=tok, exp=time.time() + 3000)
     return tok
