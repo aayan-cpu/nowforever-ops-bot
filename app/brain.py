@@ -16,6 +16,23 @@ import os
 import ssl
 import urllib.request
 import urllib.error
+from datetime import datetime, timezone, timedelta
+
+
+def now_central() -> str:
+    """Current time in Texas (US Central), DST-aware, dependency-free."""
+    utc = datetime.now(timezone.utc)
+    y = utc.year
+
+    def nth_sunday(month: int, n: int) -> int:
+        first = datetime(y, month, 1, tzinfo=timezone.utc)
+        return 1 + ((6 - first.weekday()) % 7) + (n - 1) * 7
+
+    dst_start = datetime(y, 3, nth_sunday(3, 2), 8, tzinfo=timezone.utc)   # 2am CST -> 08:00 UTC
+    dst_end = datetime(y, 11, nth_sunday(11, 1), 7, tzinfo=timezone.utc)   # 2am CDT -> 07:00 UTC
+    cdt = dst_start <= utc < dst_end
+    local = utc + timedelta(hours=(-5 if cdt else -6))
+    return local.strftime("%A, %B %-d, %Y, %-I:%M %p") + (" CDT" if cdt else " CST")
 
 from app import reports, store
 
@@ -301,6 +318,8 @@ def answer(user_msg: str, room_name: str | None, sender: str, is_admin: bool,
     prefs_block = ("\nThis user's saved preferences (honor them):\n" +
                    "\n".join(f"- {p}" for p in prefs) + "\n") if prefs else ""
     user_block = (
+        f"RIGHT NOW it is {now_central()} (Texas time). Use this for any 'today', "
+        f"'this week', 'overdue', or 'how long ago' reasoning.\n\n"
         f"OPS DATA (current):\n{snapshot}\n{prefs_block}\n"
         f"---\nUser ({sender}{', admin' if is_admin else ''}) in "
         f"room '{room_name or 'DM'}' says:\n{user_msg}"
