@@ -204,6 +204,18 @@ def analyze_images(msg: dict) -> dict:
                     })
                 except Exception as e:
                     print(f"[vision] day_report store: {e}", flush=True)
+            # Log BOL/Veeder readings for fuel reconciliation / shrinkage tracking.
+            if res.get("bol_gallons") is not None or res.get("veeder_gallons") is not None:
+                try:
+                    store.create("fuel_events", {
+                        "room_name": msg.get("room_name"), "report_date": res.get("report_date"),
+                        "doc_type": res.get("doc_type"), "bol_gallons": res.get("bol_gallons"),
+                        "veeder_gallons": res.get("veeder_gallons"),
+                        "discrepancy_gallons": res.get("discrepancy_gallons"),
+                        "summary": res.get("summary"), "data_id": msg.get("data_id"),
+                    })
+                except Exception as e:
+                    print(f"[vision] fuel_event store: {e}", flush=True)
             if res.get("needs_review"):
                 out["needs_review"] = True
                 out["reason"] = res.get("review_reason") or "image needs review"

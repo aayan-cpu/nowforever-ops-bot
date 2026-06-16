@@ -99,6 +99,14 @@ def main():
                             "fuel_gallons_sold": res.get("fuel_gallons_sold"),
                             "summary": res.get("summary"), "data_id": m.get("name", ""),
                         }, doc_id=doc_id)
+                    if res.get("bol_gallons") is not None or res.get("veeder_gallons") is not None:
+                        store.create("fuel_events", {
+                            "room_name": name, "report_date": res.get("report_date"),
+                            "doc_type": res.get("doc_type"), "bol_gallons": res.get("bol_gallons"),
+                            "veeder_gallons": res.get("veeder_gallons"),
+                            "discrepancy_gallons": res.get("discrepancy_gallons"),
+                            "summary": res.get("summary"), "data_id": m.get("name", ""),
+                        }, doc_id=doc_id + "_fuel")
                     if res.get("needs_review"):
                         found += 1
                         tid = store.next_seq("tasks")

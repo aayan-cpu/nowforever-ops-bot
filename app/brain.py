@@ -180,6 +180,18 @@ _READ_TOOLS = [
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
+        "name": "get_fuel",
+        "description": "Get fuel delivery & tank data — BOL gallons delivered, Veeder-Root "
+                       "tank readings, and any flagged BOL-vs-Veeder discrepancies — for "
+                       "reconciliation / shrinkage / loss-prevention questions. Optionally "
+                       "filter by store.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"store": {"type": "string", "description": "Optional store filter"}},
+            "required": [],
+        },
+    },
+    {
         "name": "get_reports",
         "description": "Get extracted daily/closing report figures — fuel gallons sold, "
                        "inside (store) sales, fuel sales, total sales — read from report "
@@ -275,6 +287,23 @@ def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> st
                 return "I found a photo but couldn't open it."
             res = vision.analyze_image(data, img.get("content_type", "image/jpeg"))
             return res.get("summary", "(couldn't read the image)")
+        if name == "get_fuel":
+            rows = store.list_all("fuel_events")
+            sq = str(args.get("store", "")).lower().strip()
+            if sq:
+                rows = [r for r in rows if sq in (r.get("room_name") or "").lower()]
+            if not rows:
+                return "No BOL or Veeder-Root fuel readings captured yet."
+            rows = sorted(rows, key=lambda r: r.get("report_date") or "", reverse=True)[:30]
+            out = []
+            for r in rows:
+                p = [str(r.get("room_name"))]
+                if r.get("report_date"): p.append(str(r["report_date"]))
+                if r.get("bol_gallons") is not None: p.append(f"BOL {r['bol_gallons']} gal")
+                if r.get("veeder_gallons") is not None: p.append(f"Veeder {r['veeder_gallons']} gal")
+                if r.get("discrepancy_gallons"): p.append(f"DIFF {r['discrepancy_gallons']} gal")
+                out.append(" · ".join(p))
+            return "\n".join(out)
         if name == "get_reports":
             rows = store.list_all("day_reports")
             store_q = str(args.get("store", "")).lower().strip()
