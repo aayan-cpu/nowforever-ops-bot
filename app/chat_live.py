@@ -187,12 +187,13 @@ def google_chat_response(text: str) -> dict:
 
 
 def should_reply(event: dict, c_priority: str | None = None) -> bool:
-    text = (_get(event, "message.text", "") or event.get("text") or "").lower()
-    if "nowforever" in text or "ops bot" in text or "@" in text:
-        return True
-    if c_priority == "high":
-        return True
-    return False
+    # In a room, only reply when the bot is explicitly addressed by name.
+    # High-priority messages are still ingested/logged silently — we just don't
+    # auto-chime-in on every captain's message (that would be spammy).
+    mp = event.get("messagePayload") or {}
+    msg = mp.get("message") or event.get("message") or {}
+    text = (msg.get("text") or msg.get("argumentText") or event.get("text") or "").lower()
+    return ("nowforever" in text or "ops bot" in text or "@now" in text)
 
 
 def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> str:

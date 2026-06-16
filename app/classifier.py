@@ -32,10 +32,26 @@ CATEGORY_KEYWORDS = {
     "delivery_order": [r"\bdoordash\b", r"\border\b", r"\bshipment\b", r"\bdelivery received\b"],
     "sales_issue": [r"\bsales?\s+(are\s+)?low\b", r"\blow sales\b", r"\bnot having power\b"],
     "admin_request_task": [
-        r"\bplease\b", r"\bpls\b", r"\bsend\b", r"\bupdate\b", r"\bcheck\b", r"\bpost\b", r"\blook into\b", r"\bneed\b", r"\brequired\b",
-        r"\basap\b", r"\bfix\b", r"\bget that checked\b", r"\bcan we\b", r"@\s*admin", r"@\s*Admin", r"@\s*MOIN", r"@\s*Annus"
+        r"\bplease\b", r"\bpls\b", r"\bkindly\b", r"\basap\b", r"\blook into\b", r"\bget that checked\b",
+        r"\bcan (we|you|u)\b", r"\bcould you\b", r"\bneed (to|someone|a |you)\b", r"\bhas to be\b",
+        r"@\s*admin", r"@\s*Admin", r"@\s*MOIN", r"@\s*Annus"
     ],
 }
+
+# Messages reporting something is now OK. These should NOT be high priority or
+# create action tasks — they're status updates, not problems. Guards against the
+# classic "AC is working now" / "power back on" false-positive alerts.
+RESOLVED_RE = re.compile(
+    r"\b(fixed|resolved|sorted|repaired|"
+    r"back (on|up|online|to normal|in service)|"
+    r"working (now|again|fine|properly)|up and running|"
+    r"all (good|set|clear)|no (issue|issues|problem|problems|longer)|taken care of|"
+    r"is (working|running|fine|ok|okay)|are working|good to go)\b",
+    re.I,
+)
+# Signals that keep a message urgent even if a "resolved" word also appears
+# (e.g. "fixed the sign but pump still not working").
+STILL_URGENT_RE = re.compile(r"\b(still not|still down|urgent|asap|emergency)\b", re.I)
 
 HIGH_PRIORITY_PATTERNS = [
     r"\basap\b", r"\burgent\b", r"\bneed gas\b", r"\bwe need gas\b", r"\bturned off\b.*\b(regular|super|gas|fuel)",
@@ -151,7 +167,15 @@ def classify_message(text: str, attachment_count: int = 0, room_name: str = "") 
     else:
         priority = "normal"
 
-    no_task = any(re.search(p, low, flags=re.I) for p in NO_TASK_PATTERNS)
+    # A "resolved" message (e.g. "AC is working now", "power back on") is a status
+    # update, not a live problem — downgrade it unless it's still flagged urgent.
+    resolved = bool(RESOLVED_RE.search(body)) and not STILL_URGENT_RE.search(body)
+    if resolved:
+        priority = "normal"
+        if "status_update" not in cats:
+            cats.append("status_update")
+
+    no_task = any(re.search(p, low, flags=re.I) for p in NO_TASK_PATTERNS) or resolved
     operational_category = any(c in cats for c in ["admin_request_task", "equipment_maintenance", "fuel_delivery_issue", "sales_issue"])
     is_task = (bool(TASK_VERBS.search(body)) or priority == "high" or operational_category) and not no_task
 
