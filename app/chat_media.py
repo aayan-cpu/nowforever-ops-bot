@@ -86,9 +86,79 @@ def get_chat_token() -> str | None:
     return tok
 
 
+# Downloading user-uploaded attachments needs DELEGATED (user) auth — app auth
+# is denied. We impersonate a member via chat.messages.readonly. In Cloud Run we
+# sign the JWT with IAM (no private key / no cryptography needed); locally we sign
+# with the SA key.
+DL_SUBJECT = os.getenv("OPS_DOWNLOAD_SUBJECT", "aayan@khawarsons.com")
+DL_SCOPE = "https://www.googleapis.com/auth/chat.messages.readonly"
+_dl_cache: dict = {"token": None, "exp": 0}
+
+
+def _exchange_jwt(signed_jwt: str) -> str | None:
+    import urllib.parse
+    data = urllib.parse.urlencode({
+        "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        "assertion": signed_jwt}).encode()
+    req = urllib.request.Request("https://oauth2.googleapis.com/token", data=data)
+    try:
+        return json.loads(urllib.request.urlopen(req, context=_ctx, timeout=10).read())["access_token"]
+    except Exception as e:
+        print(f"[dl] exchange: {e}", flush=True)
+        return None
+
+
+def _signjwt_dwd(scope: str, subject: str) -> str | None:
+    """Cloud Run: IAM signs a delegated JWT as CHAT_SA (needs tokenCreator)."""
+    base = _metadata_token()
+    if not base:
+        return None
+    now = int(time.time())
+    claims = {"iss": CHAT_SA, "sub": subject, "scope": scope,
+              "aud": "https://oauth2.googleapis.com/token", "iat": now, "exp": now + 3600}
+    url = f"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{CHAT_SA}:signJwt"
+    body = json.dumps({"payload": json.dumps(claims)}).encode()
+    req = urllib.request.Request(url, data=body, headers={
+        "Authorization": f"Bearer {base}", "Content-Type": "application/json"})
+    try:
+        signed = json.loads(urllib.request.urlopen(req, context=_ctx, timeout=10).read())["signedJwt"]
+    except Exception as e:
+        print(f"[dl] signJwt: {e}", flush=True)
+        return None
+    return _exchange_jwt(signed)
+
+
+def _sa_key_dwd(scope: str, subject: str) -> str | None:
+    """Local: sign the delegated JWT with the SA key."""
+    if not os.path.exists(SA_KEY):
+        return None
+    import base64
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding
+    def b64(d): return base64.urlsafe_b64encode(d).rstrip(b"=").decode()
+    sa = json.load(open(SA_KEY))
+    now = int(time.time())
+    header = b64(json.dumps({"alg": "RS256", "typ": "JWT"}).encode())
+    payload = b64(json.dumps({"iss": sa["client_email"], "sub": subject, "scope": scope,
+                              "aud": "https://oauth2.googleapis.com/token",
+                              "iat": now, "exp": now + 3600}).encode())
+    pk = serialization.load_pem_private_key(sa["private_key"].encode(), password=None)
+    sig = pk.sign(f"{header}.{payload}".encode(), padding.PKCS1v15(), hashes.SHA256())
+    return _exchange_jwt(f"{header}.{payload}.{b64(sig)}")
+
+
+def get_download_token() -> str | None:
+    if _dl_cache["token"] and time.time() < _dl_cache["exp"] - 60:
+        return _dl_cache["token"]
+    tok = _signjwt_dwd(DL_SCOPE, DL_SUBJECT) or _sa_key_dwd(DL_SCOPE, DL_SUBJECT)
+    if tok:
+        _dl_cache.update(token=tok, exp=time.time() + 3000)
+    return tok
+
+
 def download_attachment(resource_name: str) -> bytes | None:
     """Fetch raw bytes for a Chat attachment by its attachmentDataRef.resourceName."""
-    tok = get_chat_token()
+    tok = get_download_token()
     if not tok or not resource_name:
         return None
     rn = resource_name.lstrip("/")
