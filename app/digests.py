@@ -109,9 +109,27 @@ def ceo_summary() -> dict:
     return {"ok": sent > 0, "kind": "ceo_summary", "recipients": len(targets), "sent": sent}
 
 
+def weekly_report() -> dict:
+    """Weekly — AI executive rollup, DM'd to each admin (tailored to their prefs)."""
+    targets = _admin_dms()
+    sent = 0
+    for t in targets:
+        text = brain.answer(
+            "Write my WEEKLY EXECUTIVE REPORT: the week's biggest recurring issues by store, "
+            "what got resolved vs what's still dragging, fuel/delivery and daily-report patterns, "
+            "and the top 3 things to focus on next week. Concise and concrete, use the real data.",
+            None, t.get("email", "owner"), True)
+        if not text:
+            text = "No data available for the weekly report."
+        if chat_media.post_to_space(t["space"], f"📈 *Weekly Executive Report*\n{text}"):
+            sent += 1
+    return {"ok": sent > 0, "kind": "weekly_report", "sent": sent}
+
+
 JOBS = {
     "morning-digest": morning_digest,
     "urgent-reminder": urgent_reminder,
     "missing-reports": missing_reports,
     "ceo-summary": ceo_summary,
+    "weekly-report": weekly_report,
 }

@@ -204,10 +204,36 @@ _READ_TOOLS = [
             "required": ["query"],
         },
     },
+    {
+        "name": "search_history",
+        "description": "Search the FULL message history across all stores by keywords (e.g. "
+                       "'ice machine 16', 'power outage windchase', 'who reported the leak'). "
+                       "Use for questions about past events, trends, or 'find everything about X'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+    },
 ]
 
 # Action tools — only offered to admins, since they change state.
 _ACTION_TOOLS = [
+    {
+        "name": "create_task",
+        "description": "Create/log a new task or follow-up when an admin asks to add one "
+                       "(e.g. 'add a task to fix the sign at 12 by Friday').",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "What needs doing"},
+                "store": {"type": "string", "description": "Store/room it's for, if any"},
+                "priority": {"type": "string", "enum": ["high", "medium", "normal"]},
+                "due": {"type": "string", "description": "Optional due date/time in plain text"},
+            },
+            "required": ["title"],
+        },
+    },
     {
         "name": "close_task",
         "description": "Close/resolve an open task by its numeric id.",
@@ -268,6 +294,33 @@ def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> st
                 if r.get("total_sales") is not None: parts.append(f"total ${r['total_sales']}")
                 out.append(" · ".join(parts))
             return "\n".join(out)
+        if name == "search_history":
+            terms = str(args.get("query", "")).lower().split()
+            hits = []
+            for m in store.list_all("messages"):
+                hay = f"{m.get('room_name','')} {m.get('message','')} {m.get('sender','')}".lower()
+                if all(t in hay for t in terms):
+                    hits.append(m)
+            if not hits:
+                return "Nothing in the history matches that."
+            hits = sorted(hits, key=lambda m: (m.get("seq") or 0, m.get("created_at") or ""), reverse=True)[:15]
+            return "\n".join(
+                f"[{m.get('room_name')}] {m.get('sender')} ({(m.get('created_at') or m.get('timestamp_raw') or '')[:10]}): "
+                f"{(m.get('message') or '')[:160]}" for m in hits)
+        if name == "create_task":
+            tid = store.next_seq("tasks")
+            now = datetime.now(timezone.utc).isoformat()
+            store.create("tasks", {
+                "id": tid, "room_name": args.get("store", ""), "sender": sender,
+                "task_title": args.get("title", ""), "task_text": args.get("title", ""),
+                "category": "manual", "priority": args.get("priority", "normal"),
+                "status": "open", "due": args.get("due"),
+                "created_at": now, "updated_at": now,
+            }, doc_id=str(tid))
+            bits = []
+            if args.get("store"): bits.append(f"for {args['store']}")
+            if args.get("due"): bits.append(f"due {args['due']}")
+            return f"Logged it{(' ' + ', '.join(bits)) if bits else ''}."
         if name == "find_tasks":
             terms = str(args.get("query", "")).lower().split()
             hits = []
