@@ -21,7 +21,7 @@ DB_PATH = "data/ops_bot.sqlite3"
 OWNER_EMAIL = os.getenv("OPS_OWNER_EMAIL", "aayan@khawarsons.com").lower().strip()
 ADMIN_EMAILS = {e.strip().lower() for e in os.getenv(
     "OPS_ADMIN_EMAILS",
-    "aayan@khawarsons.com,admin1@khawarsons.com,admin2@khawarsons.com",
+    "aayan@khawarsons.com,admin1@nowandforever.com,admin2@nowandforever.com",
 ).split(",") if e.strip()}
 ADMIN_EMAILS.add(OWNER_EMAIL)  # owner is always an admin
 
