@@ -10,8 +10,12 @@ issues found at the end.
 import hashlib
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
+
+# Only worth vision-scanning an image if a nearby message labels it a report.
+REPORT_RE = re.compile(r"\breports?\b|\beod\b|end[- ]?of[- ]?day|closing|day\s*sheet", re.I)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import scripts.backfill_history as bf
@@ -29,6 +33,7 @@ def main():
     args = sys.argv[1:]
     since = None
     limit = None
+    scan_all = "--all" in args  # scan every image, not just report-labeled ones
     if "--since" in args:
         since = args[args.index("--since") + 1]
     if "--limit" in args:
@@ -47,11 +52,19 @@ def main():
         name, sid = s.get("displayName") or s["name"], s["name"]
         user_tok = bf.token(READONLY, subject=SUBJECT)
         room_imgs = 0
-        for m in bf.list_messages(sid, user_tok):
+        msgs = list(bf.list_messages(sid, user_tok))
+        texts = [(m.get("text") or m.get("argumentText") or "") for m in msgs]
+        for i, m in enumerate(msgs):
             ts = (m.get("createTime") or "")[:10]
             if since and ts and ts < since:
                 continue
-            for img in chat_media.image_attachments(m):
+            imgs = chat_media.image_attachments(m)
+            if not imgs:
+                continue
+            # Cost saver: only scan images a nearby message (prev/self/next) calls a report.
+            if not scan_all and not REPORT_RE.search(" ".join(texts[max(0, i - 1):i + 2])):
+                continue
+            for img in imgs:
                 if limit and scanned >= limit:
                     break
                 rn = img["resource_name"]
