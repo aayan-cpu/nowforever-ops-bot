@@ -14,8 +14,13 @@ import re
 import sys
 from datetime import datetime, timezone
 
-# Only worth vision-scanning an image if a nearby message labels it a report.
-REPORT_RE = re.compile(r"\breports?\b|\beod\b|end[- ]?of[- ]?day|closing|day\s*sheet", re.I)
+# Only worth vision-scanning an image if a nearby message marks it operational
+# (reports, deliveries, equipment, money) — skip random receipts/selfies.
+REPORT_RE = re.compile(
+    r"\b(reports?|eod|end[- ]?of[- ]?day|closing|day\s*sheet|bol|veeder|gas|gallons?|"
+    r"diesel|fuel|delivery|deliver|pump|tank|broke|broken|not working|down|power|"
+    r"outage|ice|machine|printer|register|deposit|sales|invoice|sscs|price|meter|"
+    r"reading|shift)\b", re.I)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import scripts.backfill_history as bf
@@ -52,7 +57,7 @@ def main():
         name, sid = s.get("displayName") or s["name"], s["name"]
         user_tok = bf.token(READONLY, subject=SUBJECT)
         room_imgs = 0
-        msgs = list(bf.list_messages(sid, user_tok))
+        msgs = list(bf.list_messages(sid, user_tok, since=since))
         texts = [(m.get("text") or m.get("argumentText") or "") for m in msgs]
         for i, m in enumerate(msgs):
             ts = (m.get("createTime") or "")[:10]

@@ -83,10 +83,13 @@ def list_rooms(app_tok: str) -> list[dict]:
     return rooms
 
 
-def list_messages(space: str, user_tok: str):
+def list_messages(space: str, user_tok: str, since: str | None = None):
+    flt = ""
+    if since:
+        flt = "&filter=" + urllib.parse.quote(f'createTime > "{since}T00:00:00+00:00"')
     page = ""
     while True:
-        res = api(f"{space}/messages?pageSize=100{('&pageToken=' + page) if page else ''}", user_tok)
+        res = api(f"{space}/messages?pageSize=100{flt}{('&pageToken=' + page) if page else ''}", user_tok)
         if "_error" in res:
             print(f"  ! {space} message read error: {res}"); return
         for m in res.get("messages", []):
