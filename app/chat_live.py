@@ -260,78 +260,65 @@ def should_reply(event: dict, c_priority: str | None = None) -> bool:
     return ("nowforever" in text or "ops bot" in text or "@now" in text)
 
 
-def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> str:
+def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> str | None:
+    """Return a reply for an EXACT command, or None for anything conversational
+    (so the caller routes it to the AI brain). Commands must be the whole message
+    — a sentence that merely contains 'task'/'summary' is not a command."""
     text = msg["message"] or ""
-    lower = text.lower()
+    # Strip a leading bot mention: "NowForever Ops Bot tasks" -> "tasks".
+    norm = re.sub(r"(?i)@?\s*now\s*(and|&)?\s*forever(\s*ops\s*bot)?|@?\s*ops\s*bot", "", text).strip()
+    low = norm.lower().strip(" :,.!?")
     admin = is_admin(msg["sender"])
 
-    # Admin-only commands.
-    if re.search(r"\b(summary|dashboard|what happened)\b", lower):
-        if not admin:
-            return "⛔ Only the admin can run that command."
-        d = dashboard(db_path)
-        open_count = next((x["count"] for x in d["tasks"] if x["status"] == "open"), 0)
-        high_count = next((x["count"] for x in d["priorities"] if x["priority"] == "high"), 0)
-        top = d["top_rooms"][:5]
-        lines = ["📊 Now & Forever Ops Summary", f"Messages: {d['totals'].get('messages', 0)}", f"Open tasks: {open_count}", f"High priority messages: {high_count}", "", "Top active rooms:"]
-        for r in top:
-            lines.append(f"• {r['room_name']}: {r['tasks']} tasks, {r['high']} high")
-        return "\n".join(lines)
-
-    if re.search(r"\b(alerts?|urgent)\b", lower):
-        if not admin:
-            return "⛔ Only the admin can run that command."
-        alerts = high_priority(db_path, 8)
-        if not alerts:
-            return "No high-priority alerts found."
-        lines = ["🚨 High Priority Alerts"]
-        for a in alerts:
-            lines.append(f"• [{a['room_name']}] {(a.get('message') or '')[:160]}")
-        return "\n".join(lines)
-
-    if re.search(r"\b(tasks?|open tasks?)\b", lower):
-        if not admin:
-            return "⛔ Only the admin can run that command."
-        tasks = open_tasks(db_path, limit=10)
-        if not tasks:
-            return "No open tasks found."
-        lines = ["✅ Open Tasks"]
-        for t in tasks:
-            lines.append(f"• #{t['id']} [{t['room_name']}] {t.get('task_title') or t.get('task_text')}")
-        return "\n".join(lines)
-
-    m = re.search(r"\bclose task\s*(\d+)\b|\bclose\s*(\d+)\b", lower)
+    # Explicit actions (must contain the verb + a task number).
+    m = re.fullmatch(r"(?:please\s+)?close\s+(?:task\s+)?#?(\d+)\.?", low)
     if m:
         if not admin:
             return "⛔ Only the admin can close tasks."
-        task_id_to_close = int(m.group(1) or m.group(2))
-        res = task_action(db_path, task_id_to_close, "close")
-        return f"Closed task #{task_id_to_close}." if res.get("ok") else f"Could not close task #{task_id_to_close}: {res.get('error')}"
+        tid = int(m.group(1))
+        res = task_action(db_path, tid, "close")
+        return f"Closed task #{tid}." if res.get("ok") else f"Could not close #{tid}: {res.get('error')}"
 
-    m = re.search(r"\bassign task\s*(\d+)\s+(.+)$|\bassign\s*(\d+)\s+(.+)$", text, flags=re.I | re.S)
+    m = re.fullmatch(r"(?:please\s+)?assign\s+(?:task\s+)?#?(\d+)\s+(?:to\s+)?(.+)", norm.strip(), flags=re.I)
     if m:
         if not admin:
             return "⛔ Only the admin can assign tasks."
-        task_id_to_assign = int(m.group(1) or m.group(3))
-        assignee = (m.group(2) or m.group(4) or "").strip()
-        res = task_action(db_path, task_id_to_assign, "assign", assignee)
-        return f"Assigned task #{task_id_to_assign} to {assignee}." if res.get("ok") else f"Could not assign task #{task_id_to_assign}: {res.get('error')}"
+        tid, assignee = int(m.group(1)), m.group(2).strip()
+        res = task_action(db_path, tid, "assign", assignee)
+        return f"Assigned #{tid} to {assignee}." if res.get("ok") else f"Could not assign #{tid}: {res.get('error')}"
 
-    m = re.search(r"\bshow\s+(.+)$", text, flags=re.I)
-    if m:
+    # Quick read-only commands — only when the message IS the command.
+    if low in {"summary", "dashboard", "what happened", "what happened today", "status"}:
         if not admin:
-            return "⛔ Only the admin can run that command."
-        room = m.group(1).strip()
-        rs = room_summary(db_path, room)
-        if not rs.get("stats"):
-            return f"I could not find room/site matching: {room}"
-        s = rs["stats"]
-        lines = [f"🏪 {s['room_name']}", f"Messages: {s['messages']} · Tasks: {s['tasks']} · High: {s['high']}"]
-        for t in rs.get("open_tasks", [])[:8]:
-            lines.append(f"• #{t['id']} {t.get('task_title') or t.get('task_text')}")
+            return None  # let the AI answer non-admins instead of refusing
+        d = dashboard(db_path)
+        open_count = next((x["count"] for x in d["tasks"] if x["status"] == "open"), 0)
+        high_count = next((x["count"] for x in d["priorities"] if x["priority"] == "high"), 0)
+        lines = ["📊 Now & Forever Ops Summary", f"Messages: {d['totals'].get('messages', 0)}",
+                 f"Open tasks: {open_count}", f"High priority: {high_count}", "", "Top active rooms:"]
+        for r in d["top_rooms"][:5]:
+            lines.append(f"• {r['room_name']}: {r['tasks']} tasks, {r['high']} high")
         return "\n".join(lines)
 
-    # No deterministic command matched — signal the caller to try the AI brain.
+    if low in {"alerts", "alert", "urgent", "urgents", "high priority"}:
+        if not admin:
+            return None
+        alerts = high_priority(db_path, 8)
+        if not alerts:
+            return "No high-priority alerts found."
+        return "\n".join(["🚨 High Priority Alerts"] +
+                         [f"• [{a['room_name']}] {(a.get('message') or '')[:160]}" for a in alerts])
+
+    if low in {"tasks", "open tasks", "task list", "list tasks", "open items"}:
+        if not admin:
+            return None
+        tasks = open_tasks(db_path, limit=10)
+        if not tasks:
+            return "No open tasks found."
+        return "\n".join(["✅ Open Tasks"] +
+                         [f"• #{t['id']} [{t['room_name']}] {t.get('task_title') or t.get('task_text')}" for t in tasks])
+
+    # Everything else (incl. "show me…", "what's going on at 4?") → AI brain.
     return None
 
 
