@@ -25,6 +25,18 @@ def _high_open_tasks(limit: int = 50) -> list[dict]:
     return [t for t in reports.open_tasks(limit=limit) if t.get("priority") == "high"]
 
 
+def _admin_dms() -> list[dict]:
+    """Known admin DM targets [{email, space}], learned when each admin DMs the bot.
+    Falls back to the owner's DM space if none recorded yet."""
+    try:
+        rows = [r for r in store.list_all("admin_dms") if r.get("space")]
+        if rows:
+            return rows
+    except Exception:
+        pass
+    return [{"email": "owner", "space": ADMIN_DM}]
+
+
 def morning_digest() -> dict:
     """8 AM — AI-written ops briefing to all captains."""
     text = brain.answer(
@@ -75,18 +87,26 @@ def missing_reports() -> dict:
 
 
 def ceo_summary() -> dict:
-    """Night — AI end-of-day summary, DM'd to the owner."""
-    text = brain.answer(
-        "Write the END-OF-DAY summary for the owner. Cover: the key issues today, what "
-        "is still open and urgent, and which stores need follow-up tomorrow. Be concise "
-        "and concrete; use the task numbers and store names from the data.",
-        None, "scheduler", True)
-    if not text:
-        tasks = _high_open_tasks(15)
-        text = "Open high-priority items:\n" + "\n".join(
-            f"• #{t['id']} [{t['room_name']}] {t.get('task_title')}" for t in tasks) if tasks else "Quiet day — nothing urgent open."
-    ok = chat_media.post_to_space(ADMIN_DM, f"📊 *Daily Summary*\n{text}")
-    return {"ok": ok, "kind": "ceo_summary"}
+    """Night — AI end-of-day summary, personalized per admin and DM'd to each."""
+    targets = _admin_dms()
+    sent = 0
+    for t in targets:
+        # Pass the admin's email as sender so the brain applies THEIR saved
+        # preferences (what they care about / how they want it).
+        text = brain.answer(
+            "Write the END-OF-DAY summary for me. Cover the key issues today, what's "
+            "still open and urgent, and which stores need follow-up tomorrow. Be concise "
+            "and concrete; use task numbers and store names. Tailor it to my saved "
+            "preferences if any.",
+            None, t.get("email", "owner"), True, space_id=None)
+        if not text:
+            tasks = _high_open_tasks(15)
+            text = ("Open high-priority items:\n" + "\n".join(
+                f"• #{t2['id']} [{t2['room_name']}] {t2.get('task_title')}" for t2 in tasks)) \
+                if tasks else "Quiet day — nothing urgent open."
+        if chat_media.post_to_space(t["space"], f"📊 *Daily Summary*\n{text}"):
+            sent += 1
+    return {"ok": sent > 0, "kind": "ceo_summary", "recipients": len(targets), "sent": sent}
 
 
 JOBS = {

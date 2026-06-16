@@ -13,7 +13,17 @@ from app.reports import dashboard, high_priority, open_tasks, room_summary, task
 
 DB_PATH = "data/ops_bot.sqlite3"
 
-ADMIN_EMAILS = {"aayan@khawarsons.com", "aayan@khawar-sons.com"}
+# Roles. The OWNER is the top of the hierarchy and is always an admin — no role
+# or env change can place anyone above the owner. ADMINS get full powers
+# (commands, close/assign, AI actions). Both are editable via env vars so people
+# can be added/removed without a code change. (Future: scoped, position-based
+# roles below admin — see docs/ROLES.md.)
+OWNER_EMAIL = os.getenv("OPS_OWNER_EMAIL", "aayan@khawarsons.com").lower().strip()
+ADMIN_EMAILS = {e.strip().lower() for e in os.getenv(
+    "OPS_ADMIN_EMAILS",
+    "aayan@khawarsons.com,admin1@khawarsons.com,admin2@khawarsons.com",
+).split(",") if e.strip()}
+ADMIN_EMAILS.add(OWNER_EMAIL)  # owner is always an admin
 
 # Quiet mode: while testing, the bot ingests/classifies every space message
 # (tasks, dashboard, alerts keep working) but posts NOTHING visible in rooms.
@@ -24,6 +34,25 @@ REPLY_IN_SPACES = os.getenv("OPS_REPLY_IN_SPACES", "false").lower() in {"1", "tr
 
 def is_admin(sender: str) -> bool:
     return (sender or "").lower().strip() in ADMIN_EMAILS
+
+
+def is_owner(sender: str) -> bool:
+    return (sender or "").lower().strip() == OWNER_EMAIL
+
+
+def remember_admin_dm(email: str, space_id: str) -> None:
+    """When an admin DMs the bot, record their DM space so digests can reach them."""
+    if not email or not space_id or not space_id.startswith("spaces/"):
+        return
+    try:
+        cid = email.lower().replace("/", "_")
+        payload = {"email": email.lower(), "space": space_id}
+        if store.get("admin_dms", cid):
+            store.patch("admin_dms", cid, payload)
+        else:
+            store.create("admin_dms", payload, doc_id=cid)
+    except Exception as e:
+        print(f"[admin_dm] {e}", flush=True)
 
 
 def _get(obj: dict, path: str, default: Any = None) -> Any:
@@ -370,6 +399,9 @@ def handle_google_chat_event(event: dict, db_path: str = DB_PATH) -> dict:
 
     # Always ingest/classify so tasks, dashboard, and alerts stay accurate.
     result = ingest_live_event(event, db_path)
+    # Learn each admin's DM space the first time they message, so digests reach them.
+    if is_direct_message(event) and is_admin(result.get("sender", "")):
+        remember_admin_dm(result.get("sender", ""), result.get("space_id", ""))
     c_priority = result.get("priority")
     reply = result.get("reply") or "Got it. Try: summary, alerts, tasks, or show <room name>."
 

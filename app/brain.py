@@ -77,9 +77,52 @@ def _snapshot(room_name: str | None) -> str:
     return "\n".join(lines) if lines else "(no ops data available)"
 
 
-# Read-only tools — offered to everyone so the bot can answer about ANY store on
-# demand instead of being limited to the small context snapshot.
+def _pref_id(email: str) -> str:
+    return (email or "anon").lower().replace("/", "_")[:200]
+
+
+def _load_prefs(email: str) -> list[str]:
+    try:
+        d = store.get("preferences", _pref_id(email))
+        if d and d.get("notes"):
+            return json.loads(d["notes"])
+    except Exception:
+        pass
+    return []
+
+
+def _save_pref(email: str, note: str) -> str:
+    try:
+        cid = _pref_id(email)
+        notes = _load_prefs(email)
+        notes.append(note.strip())
+        notes = notes[-25:]
+        payload = {"email": (email or "").lower(), "notes": json.dumps(notes)}
+        if store.get("preferences", cid):
+            store.patch("preferences", cid, payload)
+        else:
+            store.create("preferences", payload, doc_id=cid)
+        return "Saved. I'll keep that in mind for you going forward."
+    except Exception as e:
+        return f"Couldn't save that: {e}"
+
+
+# Read-only / self-service tools — offered to everyone. The bot can answer about
+# ANY store on demand, and each user can teach it their own preferences.
 _READ_TOOLS = [
+    {
+        "name": "remember_preference",
+        "description": "Save a lasting preference for THIS user about how the bot should "
+                       "help them — e.g. what to focus on, which stores they care about, "
+                       "what to include in their daily summary, formatting, alert topics. "
+                       "Call this whenever the user says to always/from now on do something "
+                       "for them.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"preference": {"type": "string", "description": "The preference to remember, in plain language."}},
+            "required": ["preference"],
+        },
+    },
     {
         "name": "lookup_site",
         "description": "Look up current open tasks, counts, and recent activity for a "
@@ -119,9 +162,11 @@ _ACTION_TOOLS = [
 ]
 
 
-def _run_tool(name: str, args: dict) -> str:
+def _run_tool(name: str, args: dict, sender: str = "") -> str:
     from app import reports
     try:
+        if name == "remember_preference":
+            return _save_pref(sender, str(args.get("preference", "")))
         if name == "lookup_site":
             rs = reports.room_summary(None, str(args.get("site", "")))
             s = rs.get("stats")
@@ -202,8 +247,11 @@ def answer(user_msg: str, room_name: str | None, sender: str, is_admin: bool,
     if not enabled() or not (user_msg or "").strip():
         return None
     snapshot = _snapshot(room_name)
+    prefs = _load_prefs(sender)
+    prefs_block = ("\nThis user's saved preferences (honor them):\n" +
+                   "\n".join(f"- {p}" for p in prefs) + "\n") if prefs else ""
     user_block = (
-        f"OPS DATA (current):\n{snapshot}\n\n"
+        f"OPS DATA (current):\n{snapshot}\n{prefs_block}\n"
         f"---\nUser ({sender}{', admin' if is_admin else ''}) in "
         f"room '{room_name or 'DM'}' says:\n{user_msg}"
     )
@@ -219,7 +267,7 @@ def answer(user_msg: str, room_name: str | None, sender: str, is_admin: bool,
                 results = []
                 for block in resp["content"]:
                     if block.get("type") == "tool_use":
-                        out = _run_tool(block["name"], block.get("input", {}))
+                        out = _run_tool(block["name"], block.get("input", {}), sender)
                         results.append({"type": "tool_result", "tool_use_id": block["id"], "content": out})
                 messages.append({"role": "user", "content": results})
                 continue
