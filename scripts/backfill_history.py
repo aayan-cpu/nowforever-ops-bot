@@ -53,12 +53,19 @@ def token(scope: str, subject: str | None = None) -> str:
 
 
 def api(path: str, tok: str) -> dict:
-    req = urllib.request.Request(f"https://chat.googleapis.com/v1/{path}",
-                                 headers={"Authorization": f"Bearer {tok}"})
-    try:
-        return json.loads(urllib.request.urlopen(req, context=_ctx).read() or b"{}")
-    except urllib.error.HTTPError as e:
-        return {"_error": e.code, "_body": e.read().decode()[:300]}
+    for attempt in range(4):
+        req = urllib.request.Request(f"https://chat.googleapis.com/v1/{path}",
+                                     headers={"Authorization": f"Bearer {tok}"})
+        try:
+            return json.loads(urllib.request.urlopen(req, context=_ctx, timeout=20).read() or b"{}")
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 500, 502, 503, 504) and attempt < 3:
+                time.sleep(1.5 * (attempt + 1)); continue
+            return {"_error": e.code, "_body": e.read().decode()[:300]}
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            if attempt < 3:
+                time.sleep(1.5 * (attempt + 1)); continue
+            return {"_error": "network", "_body": str(e)}
 
 
 def list_rooms(app_tok: str) -> list[dict]:
@@ -135,8 +142,18 @@ def main():
     app_tok = token("https://www.googleapis.com/auth/chat.bot")
     user_tok = token("https://www.googleapis.com/auth/chat.messages.readonly", subject=SUBJECT)
     rooms = list_rooms(app_tok)
-    print(f"{len(rooms)} room(s) to backfill (impersonating {SUBJECT}){' [DRY RUN]' if dry else ''}\n")
+    # Idempotency: preload data_ids + fingerprints already in Firestore so a
+    # re-run resumes/skips instead of duplicating.
     seen: set = set()
+    if not dry:
+        existing = store.list_all("messages")
+        for e in existing:
+            if e.get("data_id"):
+                seen.add(e["data_id"])
+            if e.get("fingerprint"):
+                seen.add(e["fingerprint"])
+        print(f"(resuming — {len(existing)} message(s) already in Firestore will be skipped)")
+    print(f"{len(rooms)} room(s) to backfill (impersonating {SUBJECT}){' [DRY RUN]' if dry else ''}\n")
     grand = 0
     for s in rooms:
         name, sid = s.get("displayName") or s["name"], s["name"]

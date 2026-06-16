@@ -117,16 +117,26 @@ def _from_doc(doc: dict) -> dict:
     return out
 
 
-def _req(method: str, path: str, body: dict | None = None) -> dict:
+def _req(method: str, path: str, body: dict | None = None, _tries: int = 4) -> dict:
     url = path if path.startswith("http") else f"{BASE}/{path}"
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(url, data=data, method=method, headers={
-        "Authorization": f"Bearer {_token()}", "Content-Type": "application/json",
-    })
-    try:
-        return json.loads(urllib.request.urlopen(req, context=_ctx).read() or b"{}")
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f"Firestore {method} {path} -> {e.code}: {e.read().decode()}") from None
+    last_err = None
+    for attempt in range(_tries):
+        req = urllib.request.Request(url, data=data, method=method, headers={
+            "Authorization": f"Bearer {_token()}", "Content-Type": "application/json",
+        })
+        try:
+            return json.loads(urllib.request.urlopen(req, context=_ctx, timeout=20).read() or b"{}")
+        except urllib.error.HTTPError as e:
+            # Retry transient server/rate-limit errors; fail fast on real 4xx.
+            if e.code in (429, 500, 502, 503, 504) and attempt < _tries - 1:
+                last_err = e; time.sleep(1.5 * (attempt + 1)); continue
+            raise RuntimeError(f"Firestore {method} {path} -> {e.code}: {e.read().decode()}") from None
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            last_err = e
+            if attempt < _tries - 1:
+                time.sleep(1.5 * (attempt + 1)); continue
+            raise RuntimeError(f"Firestore {method} {path} network error: {last_err}") from None
 
 
 # ------------------------------------------------------------- public API
