@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.classifier import classify_message, category_string, clean_text, normalize_sender
-from app import store, vision, chat_media
+from app import store, vision, chat_media, brain
 from app.ingest import pick_primary_category
 from app.reports import dashboard, high_priority, open_tasks, room_summary, task_action
 
@@ -157,8 +157,10 @@ def ingest_live_event(event: dict, db_path: str = DB_PATH) -> dict:
     existing = store.find("messages", "data_id", msg["data_id"], limit=1) or \
         store.find("messages", "fingerprint", c.fingerprint, limit=1)
     if existing:
+        cmd = build_reply(msg, c, None, db_path)
         return {"ok": True, "duplicate": True, "message_id": existing[0]["id"],
-                "reply": build_reply(msg, c, None, db_path)}
+                "reply": cmd or "Got it.", "command_matched": cmd is not None,
+                "text": msg["message"], "room_name": msg["room_name"], "sender": msg["sender"]}
 
     # AI image understanding (BOL/Veeder photos, etc.) — best-effort, gated on key.
     vis = analyze_images(msg)
@@ -198,7 +200,8 @@ def ingest_live_event(event: dict, db_path: str = DB_PATH) -> dict:
             "confidence": c.confidence, "created_at": now, "updated_at": now,
         }, doc_id=str(task_id))
 
-    reply = build_reply(msg, c, task_id, db_path)
+    cmd = build_reply(msg, c, task_id, db_path)
+    reply = cmd if cmd is not None else default_ack(msg, c, task_id)
     if vis["summary"]:
         reply = (reply + "\n" + vis["summary"]).strip()
     return {
@@ -211,6 +214,10 @@ def ingest_live_event(event: dict, db_path: str = DB_PATH) -> dict:
         "is_task": is_task,
         "vision": vis["results"],
         "reply": reply,
+        "command_matched": cmd is not None,
+        "text": msg["message"],
+        "room_name": msg["room_name"],
+        "sender": msg["sender"],
     }
 
 
@@ -312,7 +319,12 @@ def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> st
             lines.append(f"• #{t['id']} {t.get('task_title') or t.get('task_text')}")
         return "\n".join(lines)
 
-    # Automatic task/alert confirmation.
+    # No deterministic command matched — signal the caller to try the AI brain.
+    return None
+
+
+def default_ack(msg: dict, c, task_id: int | None) -> str:
+    """Fallback acknowledgement used when the AI brain is unavailable."""
     if task_id:
         icon = "🚨" if c.priority == "high" else "📝"
         return f"{icon} Logged {c.priority} task #{task_id}\nSite/room: {msg['room_name']}\nCategory: {pick_primary_category(c.categories)}\nAssignee: {c.assigned_hint or 'unassigned'}"
@@ -360,11 +372,18 @@ def handle_google_chat_event(event: dict, db_path: str = DB_PATH) -> dict:
     result = ingest_live_event(event, db_path)
     c_priority = result.get("priority")
     reply = result.get("reply") or "Got it. Try: summary, alerts, tasks, or show <room name>."
-    # DMs always reply so the admin can test commands.
-    if is_direct_message(event):
-        return google_chat_response(reply)
-    # In spaces/rooms: stay silent during testing. The message is still
-    # ingested above; we just don't post anything back to the group.
-    if REPLY_IN_SPACES and should_reply(event, c_priority):
+
+    # Decide whether we'll actually post a reply: always in DMs; in rooms only
+    # when addressed (and reply-in-spaces enabled).
+    will_reply = is_direct_message(event) or (REPLY_IN_SPACES and should_reply(event, c_priority))
+
+    # Conversational AI: if no exact command matched, let the Claude brain answer.
+    if will_reply and not result.get("command_matched") and brain.enabled():
+        ai = brain.answer(result.get("text", ""), result.get("room_name"),
+                          result.get("sender", "unknown"), is_admin(result.get("sender", "")))
+        if ai:
+            reply = ai
+
+    if will_reply:
         return google_chat_response(reply)
     return google_chat_response("")  # empty -> {} -> no visible message in the room
