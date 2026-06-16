@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -13,6 +14,12 @@ from app.reports import dashboard, high_priority, open_tasks, room_summary, task
 DB_PATH = "data/ops_bot.sqlite3"
 
 ADMIN_EMAILS = {"aayan@khawarsons.com", "aayan@khawar-sons.com"}
+
+# Quiet mode: while testing, the bot ingests/classifies every space message
+# (tasks, dashboard, alerts keep working) but posts NOTHING visible in rooms.
+# It still replies in DMs so the admin can verify functionality. Flip this on
+# later (env var OPS_REPLY_IN_SPACES=true) to let it talk in spaces.
+REPLY_IN_SPACES = os.getenv("OPS_REPLY_IN_SPACES", "false").lower() in {"1", "true", "yes"}
 
 
 def is_admin(sender: str) -> bool:
@@ -295,11 +302,15 @@ def handle_google_chat_event(event: dict, db_path: str = DB_PATH) -> dict:
     if event_type == "REMOVED_FROM_SPACE":
         return google_chat_response("")
 
+    # Always ingest/classify so tasks, dashboard, and alerts stay accurate.
     result = ingest_live_event(event, db_path)
     c_priority = result.get("priority")
     reply = result.get("reply") or "Got it. Try: summary, alerts, tasks, or show <room name>."
-    # Always reply to DMs. In rooms, only reply if mentioned or high priority.
-    if is_direct_message(event) or should_reply(event, c_priority):
+    # DMs always reply so the admin can test commands.
+    if is_direct_message(event):
         return google_chat_response(reply)
-    # Fallback: always reply so Google Chat doesn't show "not responding"
-    return google_chat_response(reply)
+    # In spaces/rooms: stay silent during testing. The message is still
+    # ingested above; we just don't post anything back to the group.
+    if REPLY_IN_SPACES and should_reply(event, c_priority):
+        return google_chat_response(reply)
+    return google_chat_response("")  # empty -> {} -> no visible message in the room
