@@ -157,14 +157,20 @@ def main():
     grand = 0
     for s in rooms:
         name, sid = s.get("displayName") or s["name"], s["name"]
-        count = 0
+        count = errors = 0
         for m in list_messages(sid, user_tok):
             if dry:
                 count += 1
-            elif store_message(m, name, sid, seen):
-                count += 1
+                continue
+            try:
+                if store_message(m, name, sid, seen):
+                    count += 1
+            except Exception as e:  # transient network/Firestore error — skip, resume later
+                errors += 1
+                if errors <= 3:
+                    print(f"    ! skip {m.get('name','?')}: {str(e)[:80]}")
         grand += count
-        print(f"  {count:>5}  {name}")
+        print(f"  {count:>5}  {name}" + (f"  ({errors} skipped)" if errors else ""))
     print(f"\nTotal messages {'found' if dry else 'stored'}: {grand}")
 
 
