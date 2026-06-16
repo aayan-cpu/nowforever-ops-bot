@@ -168,6 +168,18 @@ def analyze_images(msg: dict) -> dict:
                                        context=f"Room: {msg.get('room_name')}. {msg.get('message','')}")
             out["results"].append(res)
             lines.append(f"📷 {res.get('doc_type','image')}: {res.get('summary','')}")
+            # Log day-report figures so they're queryable (get_reports / volumes).
+            if res.get("doc_type") == "day_report":
+                try:
+                    store.create("day_reports", {
+                        "room_name": msg.get("room_name"), "report_date": res.get("report_date"),
+                        "shift": res.get("shift"), "total_sales": res.get("total_sales"),
+                        "inside_sales": res.get("inside_sales"), "fuel_sales": res.get("fuel_sales"),
+                        "fuel_gallons_sold": res.get("fuel_gallons_sold"),
+                        "summary": res.get("summary"), "data_id": msg.get("data_id"),
+                    })
+                except Exception as e:
+                    print(f"[vision] day_report store: {e}", flush=True)
             if res.get("needs_review"):
                 out["needs_review"] = True
                 out["reason"] = res.get("review_reason") or "image needs review"
