@@ -77,6 +77,54 @@ _PROMPT = (
 )
 
 
+_SUPPORTED = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+_MAX_RAW = 3_500_000  # keep under Claude's ~5MB base64 limit; big phone photos exceed it
+
+
+def _downscale_pil(b: bytes) -> bytes:
+    from PIL import Image
+    import io
+    img = Image.open(io.BytesIO(b)).convert("RGB")
+    if max(img.size) > 1568:
+        r = 1568 / max(img.size)
+        img = img.resize((int(img.size[0] * r), int(img.size[1] * r)))
+    out = io.BytesIO(); q = 85
+    img.save(out, "JPEG", quality=q)
+    while out.tell() > _MAX_RAW and q > 40:
+        q -= 10; out = io.BytesIO(); img.save(out, "JPEG", quality=q)
+    return out.getvalue()
+
+
+def _downscale_sips(b: bytes) -> bytes:
+    """macOS fallback (Pillow won't build on Python 3.14) for the local scanner."""
+    import subprocess, tempfile, os
+    with tempfile.NamedTemporaryFile(suffix=".img", delete=False) as f:
+        f.write(b); src = f.name
+    dst = src + ".out.jpg"
+    try:
+        subprocess.run(["sips", "-Z", "1568", "-s", "format", "jpeg", src, "--out", dst],
+                       capture_output=True, timeout=25, check=True)
+        with open(dst, "rb") as g:
+            return g.read()
+    finally:
+        for p in (src, dst):
+            try: os.remove(p)
+            except OSError: pass
+
+
+def _maybe_downscale(b: bytes, media_type: str):
+    """Resize/convert oversized or unsupported images so Claude accepts them."""
+    if len(b) <= _MAX_RAW and media_type in _SUPPORTED:
+        return b, media_type
+    for fn in (_downscale_pil, _downscale_sips):
+        try:
+            return fn(b), "image/jpeg"
+        except Exception:
+            continue
+    print("[vision] could not downscale; sending as-is", flush=True)
+    return b, media_type
+
+
 def enabled() -> bool:
     # Requires BOTH the API key AND an explicit opt-in, so enabling the chatbot
     # (which shares ANTHROPIC_API_KEY) does not silently turn on paid image analysis.
@@ -90,6 +138,7 @@ def analyze_image(image_bytes: bytes, media_type: str = "image/jpeg", context: s
     if not enabled():
         raise RuntimeError("ANTHROPIC_API_KEY not set; vision is disabled")
 
+    image_bytes, media_type = _maybe_downscale(image_bytes, media_type)
     b64 = base64.standard_b64encode(image_bytes).decode()
     body = {
         "model": MODEL,
