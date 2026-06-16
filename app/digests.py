@@ -9,9 +9,11 @@ Spaces are configurable via env so they can be retargeted without code changes.
 from __future__ import annotations
 
 import os
-from datetime import date
+from datetime import date, datetime, timezone
 
 from app import reports, chat_media, brain, store
+
+ESCALATE_HOURS = float(os.getenv("OPS_ESCALATE_HOURS", "36"))
 
 ALL_CAPTAINS = os.getenv("OPS_ALL_CAPTAINS_SPACE", "spaces/AAAAhO6H0_Y")
 OFFICES = os.getenv("OPS_OFFICES_SPACE", "spaces/AAAAaIRkgq8")
@@ -109,6 +111,31 @@ def ceo_summary() -> dict:
     return {"ok": sent > 0, "kind": "ceo_summary", "recipients": len(targets), "sent": sent}
 
 
+def _age_hours(created_at: str) -> float:
+    try:
+        dt = datetime.fromisoformat((created_at or "").replace("Z", "+00:00"))
+        return (datetime.now(timezone.utc) - dt).total_seconds() / 3600
+    except Exception:
+        return 0.0
+
+
+def escalation() -> dict:
+    """Escalate high-priority tasks still open past the SLA window to admins."""
+    stale = [(_age_hours(t.get("created_at", "")), t)
+             for t in _high_open_tasks(200)]
+    stale = sorted([(a, t) for a, t in stale if a >= ESCALATE_HOURS], reverse=True)
+    if not stale:
+        return {"ok": True, "kind": "escalation", "stale": 0}
+    lines = [f"⏰ *Escalation — {len(stale)} urgent item(s) open past {int(ESCALATE_HOURS)}h:*"]
+    for age, t in stale[:15]:
+        d, h = int(age // 24), int(age % 24)
+        ago = (f"{d}d " if d else "") + f"{h}h"
+        lines.append(f"• [{t.get('room_name')}] {t.get('task_title') or t.get('task_text')} — open {ago}")
+    msg = "\n".join(lines)
+    sent = sum(1 for tgt in _admin_dms() if chat_media.post_to_space(tgt["space"], msg))
+    return {"ok": sent > 0, "kind": "escalation", "stale": len(stale)}
+
+
 def weekly_report() -> dict:
     """Weekly — AI executive rollup, DM'd to each admin (tailored to their prefs)."""
     targets = _admin_dms()
@@ -132,4 +159,5 @@ JOBS = {
     "missing-reports": missing_reports,
     "ceo-summary": ceo_summary,
     "weekly-report": weekly_report,
+    "escalation": escalation,
 }

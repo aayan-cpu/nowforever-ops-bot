@@ -180,6 +180,17 @@ _READ_TOOLS = [
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
+        "name": "get_scorecard",
+        "description": "Per-store scorecard / health: open task count, high-priority count, "
+                       "top recurring issue types, and activity volume. Use for 'how is store "
+                       "X doing', store performance, or comparison questions.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"store": {"type": "string", "description": "Store name/number"}},
+            "required": ["store"],
+        },
+    },
+    {
         "name": "get_fuel",
         "description": "Get fuel delivery & tank data — BOL gallons delivered, Veeder-Root "
                        "tank readings, and any flagged BOL-vs-Veeder discrepancies — for "
@@ -287,6 +298,16 @@ def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> st
                 return "I found a photo but couldn't open it."
             res = vision.analyze_image(data, img.get("content_type", "image/jpeg"))
             return res.get("summary", "(couldn't read the image)")
+        if name == "get_scorecard":
+            sq = str(args.get("store", "")).lower().strip()
+            tasks = [t for t in reports.open_tasks(limit=600) if sq in (t.get("room_name") or "").lower()]
+            msgs = [m for m in store.list_all("messages") if sq in (m.get("room_name") or "").lower()]
+            from collections import Counter
+            cats = Counter(t.get("category") or "other" for t in tasks)
+            high = sum(1 for t in tasks if t.get("priority") == "high")
+            top = ", ".join(f"{c} ({n})" for c, n in cats.most_common(5)) or "none"
+            return (f"{args.get('store')}: {len(tasks)} open tasks ({high} high-priority), "
+                    f"{len(msgs)} messages on record. Top open issue types: {top}.")
         if name == "get_fuel":
             rows = store.list_all("fuel_events")
             sq = str(args.get("store", "")).lower().strip()
