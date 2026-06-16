@@ -77,8 +77,24 @@ def _snapshot(room_name: str | None) -> str:
     return "\n".join(lines) if lines else "(no ops data available)"
 
 
-# Action tools the brain can call — only offered to admins, since they change state.
-_TOOLS = [
+# Read-only tools — offered to everyone so the bot can answer about ANY store on
+# demand instead of being limited to the small context snapshot.
+_READ_TOOLS = [
+    {
+        "name": "lookup_site",
+        "description": "Look up current open tasks, counts, and recent activity for a "
+                       "specific store/site by name or number (e.g. '11', 'Windchase', "
+                       "'4 Channelview'). Use this whenever the user asks about a particular store.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"site": {"type": "string", "description": "Store name or number"}},
+            "required": ["site"],
+        },
+    },
+]
+
+# Action tools — only offered to admins, since they change state.
+_ACTION_TOOLS = [
     {
         "name": "close_task",
         "description": "Close/resolve an open task by its numeric id.",
@@ -106,6 +122,15 @@ _TOOLS = [
 def _run_tool(name: str, args: dict) -> str:
     from app import reports
     try:
+        if name == "lookup_site":
+            rs = reports.room_summary(None, str(args.get("site", "")))
+            s = rs.get("stats")
+            if not s:
+                return f"No data found for site '{args.get('site')}'."
+            out = [f"{s['room_name']}: {s['messages']} msgs, {s['tasks']} task-msgs, {s['high']} high-priority."]
+            for t in rs.get("open_tasks", [])[:12]:
+                out.append(f"#{t['id']} ({t.get('priority')}) {t.get('task_title') or t.get('task_text')}")
+            return "\n".join(out)
         if name == "close_task":
             r = reports.task_action(None, int(args["task_id"]), "close")
             return f"Closed task #{args['task_id']}." if r.get("ok") else f"Failed: {r.get('error')}"
@@ -184,7 +209,8 @@ def answer(user_msg: str, room_name: str | None, sender: str, is_admin: bool,
     )
     # Prior turns give multi-turn continuity ("what about site 11?").
     messages = _load_turns(space_id) + [{"role": "user", "content": user_block}]
-    tools = _TOOLS if is_admin else None  # only admins can mutate tasks
+    # Everyone gets read tools; only admins can mutate tasks.
+    tools = _READ_TOOLS + (_ACTION_TOOLS if is_admin else [])
     try:
         for _ in range(4):  # tool-use loop
             resp = _call_claude(messages, tools)
