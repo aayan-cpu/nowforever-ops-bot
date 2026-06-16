@@ -135,9 +135,45 @@ def _call_claude(messages: list, tools: list | None) -> dict:
     return json.loads(urllib.request.urlopen(req, context=_ctx, timeout=45).read())
 
 
-def answer(user_msg: str, room_name: str | None, sender: str, is_admin: bool) -> str | None:
+def _conv_id(space_id: str) -> str:
+    return (space_id or "dm").replace("/", "_")[:1400]
+
+
+def _load_turns(space_id: str | None) -> list[dict]:
+    if not space_id:
+        return []
+    try:
+        d = store.get("conversations", _conv_id(space_id))
+        if d and d.get("turns"):
+            return json.loads(d["turns"])
+    except Exception:
+        pass
+    return []
+
+
+def _save_turn(space_id: str | None, user_text: str, assistant_text: str) -> None:
+    if not space_id:
+        return
+    try:
+        cid = _conv_id(space_id)
+        turns = _load_turns(space_id)
+        turns.append({"role": "user", "content": user_text[:2000]})
+        turns.append({"role": "assistant", "content": assistant_text[:2000]})
+        turns = turns[-6:]  # keep last 3 exchanges
+        payload = {"turns": json.dumps(turns)}
+        if store.get("conversations", cid):
+            store.patch("conversations", cid, payload)
+        else:
+            store.create("conversations", payload, doc_id=cid)
+    except Exception as e:
+        print(f"[brain] save turns: {e}", flush=True)
+
+
+def answer(user_msg: str, room_name: str | None, sender: str, is_admin: bool,
+           space_id: str | None = None) -> str | None:
     """Return Claude's reply, executing close/assign tools if it requests them
-    (admins only). Returns None on failure so the caller can fall back."""
+    (admins only), with short-term memory of the last few turns in this space.
+    Returns None on failure so the caller can fall back."""
     if not enabled() or not (user_msg or "").strip():
         return None
     snapshot = _snapshot(room_name)
@@ -146,7 +182,8 @@ def answer(user_msg: str, room_name: str | None, sender: str, is_admin: bool) ->
         f"---\nUser ({sender}{', admin' if is_admin else ''}) in "
         f"room '{room_name or 'DM'}' says:\n{user_msg}"
     )
-    messages = [{"role": "user", "content": user_block}]
+    # Prior turns give multi-turn continuity ("what about site 11?").
+    messages = _load_turns(space_id) + [{"role": "user", "content": user_block}]
     tools = _TOOLS if is_admin else None  # only admins can mutate tasks
     try:
         for _ in range(4):  # tool-use loop
@@ -160,8 +197,10 @@ def answer(user_msg: str, room_name: str | None, sender: str, is_admin: bool) ->
                         results.append({"type": "tool_result", "tool_use_id": block["id"], "content": out})
                 messages.append({"role": "user", "content": results})
                 continue
-            text = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
-            return text.strip() or None
+            text = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text").strip()
+            if text:
+                _save_turn(space_id, user_msg, text)
+            return text or None
         return None
     except urllib.error.HTTPError as e:
         print(f"[brain] {e.code}: {e.read().decode()[:200]}", flush=True)

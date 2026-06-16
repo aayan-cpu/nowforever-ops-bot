@@ -230,6 +230,7 @@ def ingest_live_event(event: dict, db_path: str = DB_PATH) -> dict:
         "text": msg["message"],
         "room_name": msg["room_name"],
         "sender": msg["sender"],
+        "space_id": msg["room_id"],
     }
 
 
@@ -379,7 +380,8 @@ def handle_google_chat_event(event: dict, db_path: str = DB_PATH) -> dict:
     # Conversational AI: if no exact command matched, let the Claude brain answer.
     if will_reply and not result.get("command_matched") and brain.enabled():
         ai = brain.answer(result.get("text", ""), result.get("room_name"),
-                          result.get("sender", "unknown"), is_admin(result.get("sender", "")))
+                          result.get("sender", "unknown"), is_admin(result.get("sender", "")),
+                          space_id=result.get("space_id"))
         if ai:
             reply = ai
 
