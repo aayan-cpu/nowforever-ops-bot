@@ -173,6 +173,13 @@ _READ_TOOLS = [
         },
     },
     {
+        "name": "read_image",
+        "description": "Read the most recent photo posted in this conversation when the user "
+                       "refers to 'this photo', 'the image I sent', 'read that', 'what does "
+                       "this say', etc. Returns what the image shows.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
         "name": "get_reports",
         "description": "Get extracted daily/closing report figures — fuel gallons sold, "
                        "inside (store) sales, fuel sales, total sales — read from report "
@@ -225,11 +232,23 @@ _ACTION_TOOLS = [
 ]
 
 
-def _run_tool(name: str, args: dict, sender: str = "") -> str:
+def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> str:
     from app import reports
     try:
         if name == "remember_preference":
             return _save_pref(sender, str(args.get("preference", "")))
+        if name == "read_image":
+            from app import chat_media, vision
+            if not space_id:
+                return "No conversation context to find an image."
+            img = chat_media.latest_image(space_id)
+            if not img:
+                return "I don't see a recent photo in this conversation."
+            data = chat_media.download_attachment(img["resource_name"])
+            if not data:
+                return "I found a photo but couldn't open it."
+            res = vision.analyze_image(data, img.get("content_type", "image/jpeg"))
+            return res.get("summary", "(couldn't read the image)")
         if name == "get_reports":
             rows = store.list_all("day_reports")
             store_q = str(args.get("store", "")).lower().strip()
@@ -369,7 +388,7 @@ def answer(user_msg: str, room_name: str | None, sender: str, is_admin: bool,
                 results = []
                 for block in resp["content"]:
                     if block.get("type") == "tool_use":
-                        out = _run_tool(block["name"], block.get("input", {}), sender)
+                        out = _run_tool(block["name"], block.get("input", {}), sender, space_id or "")
                         results.append({"type": "tool_result", "tool_use_id": block["id"], "content": out})
                 messages.append({"role": "user", "content": results})
                 continue

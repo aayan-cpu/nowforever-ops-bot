@@ -183,6 +183,25 @@ def download_attachment(resource_name: str) -> bytes | None:
         return None
 
 
+def latest_image(space_id: str):
+    """Find the most recent image attachment in a space (for on-demand reading)."""
+    tok = get_download_token()
+    if not tok or not space_id:
+        return None
+    url = f"https://chat.googleapis.com/v1/{space_id}/messages?pageSize=25&orderBy=createTime%20desc"
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {tok}"})
+    try:
+        data = json.loads(urllib.request.urlopen(req, context=_ctx, timeout=15).read() or b"{}")
+    except Exception as e:
+        print(f"[latest_image] {e}", flush=True)
+        return None
+    for m in data.get("messages", []):
+        imgs = image_attachments(m)
+        if imgs:
+            return imgs[0]
+    return None
+
+
 def post_to_space(space: str, text: str) -> bool:
     """Proactively post a message to a Chat space (for digests/alerts)."""
     tok = get_chat_token()

@@ -147,6 +147,30 @@ def extract_chat_event(event: dict) -> dict:
     }
 
 
+# Operational signal: words that mean a photo is worth auto-reading (reports,
+# deliveries, equipment, money). Non-operational photos are logged but only read
+# on demand when someone asks about them.
+_OPS_KW = re.compile(
+    r"\b(report|bol|veeder|gas|gallons?|diesel|fuel|delivery|deliver|pump|tank|"
+    r"broke|broken|not working|down|power|outage|ice|machine|printer|register|"
+    r"deposit|sales|invoice|sscs|price|meter|reading|shift|closing)\b", re.I)
+_OPS_CATEGORIES = {"fuel_delivery_issue", "equipment_maintenance", "sales_issue",
+                   "admin_request_task", "daily_shift_report", "deposit_cash_bank",
+                   "fuel_price_competition"}
+
+
+def _is_operational(c, text: str) -> bool:
+    if c.is_task or c.priority in ("high", "medium"):
+        return True
+    if any(cat in c.categories for cat in _OPS_CATEGORIES):
+        return True
+    return bool(_OPS_KW.search(text or ""))
+
+
+def _no_vision() -> dict:
+    return {"results": [], "needs_review": False, "reason": "", "summary": "", "category": "image_review"}
+
+
 def analyze_images(msg: dict) -> dict:
     """Download + AI-analyze any image attachments. Best-effort: never raises.
 
@@ -205,8 +229,9 @@ def ingest_live_event(event: dict, db_path: str = DB_PATH) -> dict:
                 "reply": cmd or "Got it.", "command_matched": cmd is not None,
                 "text": msg["message"], "room_name": msg["room_name"], "sender": msg["sender"]}
 
-    # AI image understanding (BOL/Veeder photos, etc.) — best-effort, gated on key.
-    vis = analyze_images(msg)
+    # Auto-read only OPERATIONAL images (reports, BOLs, deliveries, equipment, money).
+    # Other photos are still logged; the bot reads them on demand if someone asks.
+    vis = analyze_images(msg) if _is_operational(c, msg["message"]) else _no_vision()
     priority = "high" if vis["needs_review"] else c.priority
     is_task = c.is_task or vis["needs_review"]
 
