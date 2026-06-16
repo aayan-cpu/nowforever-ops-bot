@@ -36,30 +36,39 @@ _SCHEMA = {
     "properties": {
         "doc_type": {
             "type": "string",
-            "enum": ["bol", "veeder_root", "fuel_receipt", "price_sign",
-                     "equipment", "other"],
+            "enum": ["bol", "veeder_root", "day_report", "fuel_receipt",
+                     "price_sign", "equipment", "other"],
         },
         "summary": {"type": "string", "description": "One-line description of the image."},
         "bol_gallons": {"type": ["number", "null"], "description": "Total gallons on a Bill of Lading, else null."},
         "veeder_gallons": {"type": ["number", "null"], "description": "Gallons from a Veeder-Root tank reading, else null."},
+        # Day / closing report fields
+        "report_date": {"type": ["string", "null"], "description": "Date on a daily/shift/closing report, else null."},
+        "shift": {"type": ["string", "null"], "description": "Shift label (day/night/1/2) on a report, else null."},
+        "total_sales": {"type": ["number", "null"], "description": "Total sales $ on a day report, else null."},
         "amounts": {"type": "array", "items": {"type": "string"}, "description": "Dollar amounts seen."},
         "gallons": {"type": "array", "items": {"type": "string"}, "description": "Any gallon figures seen."},
         "prices": {"type": "array", "items": {"type": "string"}, "description": "Per-gallon prices seen."},
         "site_hint": {"type": ["string", "null"], "description": "Site/store name or number if visible."},
-        "model_flagged_issue": {"type": "boolean", "description": "Does the image itself show a problem (damage, error, outage)?"},
+        "model_flagged_issue": {"type": "boolean", "description": "Does the image show a problem worth a human review (missing/blank fields, math that doesn't add up, damage, error, outage, anomaly)?"},
     },
     "required": ["doc_type", "summary", "bol_gallons", "veeder_gallons",
+                 "report_date", "shift", "total_sales",
                  "amounts", "gallons", "prices", "site_hint", "model_flagged_issue"],
     "additionalProperties": False,
 }
 
 _PROMPT = (
     "You are an operations assistant for a chain of gas stations. Examine this "
-    "image from a station chat and extract the structured fields. If it's a Bill "
-    "of Lading (BOL), read the TOTAL gallons delivered into bol_gallons. If it's a "
-    "Veeder-Root tank monitor reading, read the gallons into veeder_gallons. "
-    "Capture any dollar amounts, gallon figures, and per-gallon prices you see. "
-    "Be precise with numbers; if unsure, use null. Respond only with the structured data."
+    "image from a station chat and extract the structured fields.\n"
+    "- Bill of Lading (BOL): read the TOTAL gallons delivered into bol_gallons.\n"
+    "- Veeder-Root tank monitor reading: read the gallons into veeder_gallons.\n"
+    "- Daily / shift / closing report (doc_type='day_report'): read report_date, "
+    "shift, and total_sales; capture key dollar amounts; set model_flagged_issue=true "
+    "if required fields are blank/missing or the totals don't add up.\n"
+    "Always capture any dollar amounts, gallon figures, and per-gallon prices you see, "
+    "and the store/site if visible. Be precise with numbers; if unsure, use null. "
+    "Respond only with the structured data."
 )
 
 
@@ -110,7 +119,11 @@ def _reconcile(data: dict) -> dict:
     veeder = data.get("veeder_gallons")
     discrepancy = None
     needs_review = bool(data.get("model_flagged_issue"))
-    reason = "image flagged a problem" if needs_review else ""
+    if needs_review:
+        reason = ("day report needs review (missing/incorrect fields)"
+                  if data.get("doc_type") == "day_report" else "image flagged a problem")
+    else:
+        reason = ""
     if isinstance(bol, (int, float)) and isinstance(veeder, (int, float)):
         discrepancy = round(abs(bol - veeder), 2)
         if discrepancy > DISCREPANCY_THRESHOLD:
@@ -119,4 +132,9 @@ def _reconcile(data: dict) -> dict:
     data["discrepancy_gallons"] = discrepancy
     data["needs_review"] = needs_review
     data["review_reason"] = reason
+    # Category used when this becomes a review task.
+    data["review_category"] = {
+        "bol": "bol_veeder_review", "veeder_root": "bol_veeder_review",
+        "day_report": "day_report_review",
+    }.get(data.get("doc_type"), "image_review")
     return data

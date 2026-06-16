@@ -124,7 +124,8 @@ def analyze_images(msg: dict) -> dict:
     Returns {"results": [...], "needs_review": bool, "reason": str, "summary": str}.
     No-op (empty) unless ANTHROPIC_API_KEY is set and there are image attachments.
     """
-    out = {"results": [], "needs_review": False, "reason": "", "summary": ""}
+    out = {"results": [], "needs_review": False, "reason": "", "summary": "",
+           "category": "image_review"}
     images = msg.get("image_attachments") or []
     if not images or not vision.enabled():
         return out
@@ -141,6 +142,7 @@ def analyze_images(msg: dict) -> dict:
             if res.get("needs_review"):
                 out["needs_review"] = True
                 out["reason"] = res.get("review_reason") or "image needs review"
+                out["category"] = res.get("review_category") or "image_review"
         except Exception as e:  # vision/network failure must never break ingest
             print(f"[vision] error: {e}", flush=True)
     out["summary"] = "\n".join(lines)
@@ -194,7 +196,7 @@ def ingest_live_event(event: dict, db_path: str = DB_PATH) -> dict:
         store.create("tasks", {
             "id": task_id, "message_id": message_id, "room_name": msg["room_name"],
             "sender": msg["sender"], "task_title": title, "task_text": body,
-            "category": ("bol_veeder_review" if vis["needs_review"] else category),
+            "category": (vis["category"] if vis["needs_review"] else category),
             "priority": priority, "assigned_hint": c.assigned_hint,
             "assignee": c.assigned_hint, "status": "open", "source_fingerprint": c.fingerprint,
             "confidence": c.confidence, "created_at": now, "updated_at": now,

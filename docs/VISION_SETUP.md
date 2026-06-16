@@ -1,8 +1,14 @@
 # AI Image Reading (Photos in Chat)
 
 The bot can read photos posted in station chats — Bills of Lading (BOL), Veeder-Root
-tank readings, fuel receipts, price signs — and extract structured data with AI.
-It uses **Claude vision** (Anthropic Messages API).
+tank readings, **daily/closing reports**, fuel receipts, price signs — and extract
+structured data with AI. It uses **Claude vision** (Anthropic Messages API).
+
+Two flagging behaviors create high-priority review tasks automatically:
+- **Gallon mismatch** — BOL total vs Veeder-Root reading differ by more than
+  `OPS_BOL_THRESHOLD` gallons (default 500) → `bol_veeder_review` task.
+- **Day report problems** — a daily/closing report photo with missing/blank fields
+  or totals that don't add up → `day_report_review` task.
 
 ## Important: the API key is a SEPARATE Anthropic account
 
