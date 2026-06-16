@@ -17,7 +17,7 @@ import ssl
 import urllib.request
 import urllib.error
 
-from app import reports
+from app import reports, store
 
 API_KEY_ENV = "ANTHROPIC_API_KEY"
 MODEL = os.getenv("OPS_BRAIN_MODEL", "claude-opus-4-8")
