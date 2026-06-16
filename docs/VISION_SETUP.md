@@ -67,6 +67,7 @@ ANTHROPIC_API_KEY=sk-ant-... python scripts/test_vision.py path/to/bol.jpg
 
 | Env var | Default | Meaning |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | Claude key (separate account). Unset ⇒ feature off. |
+| `ANTHROPIC_API_KEY` | — | Claude key (separate account). Shared with the chatbot brain. |
+| `OPS_VISION_ENABLED` | `false` | Must be `true` to turn image analysis on. Without it, images stay off even when the key is set (so enabling the chatbot doesn't auto-bill for images). |
 | `OPS_VISION_MODEL` | `claude-opus-4-8` | Vision model. |
 | `OPS_BOL_THRESHOLD` | `500` | Gallons of BOL-vs-Veeder difference that flags a review. |

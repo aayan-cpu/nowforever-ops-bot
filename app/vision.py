@@ -64,7 +64,10 @@ _PROMPT = (
 
 
 def enabled() -> bool:
-    return bool(os.getenv(API_KEY_ENV))
+    # Requires BOTH the API key AND an explicit opt-in, so enabling the chatbot
+    # (which shares ANTHROPIC_API_KEY) does not silently turn on paid image analysis.
+    return bool(os.getenv(API_KEY_ENV)) and \
+        os.getenv("OPS_VISION_ENABLED", "false").lower() in {"1", "true", "yes"}
 
 
 def analyze_image(image_bytes: bytes, media_type: str = "image/jpeg", context: str = "") -> dict:
