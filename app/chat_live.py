@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.classifier import classify_message, category_string, clean_text, normalize_sender
-from app import store
+from app import store, vision, chat_media
 from app.ingest import pick_primary_category
 from app.reports import dashboard, high_priority, open_tasks, room_summary, task_action
 
@@ -112,9 +112,39 @@ def extract_chat_event(event: dict) -> dict:
         "message": text,
         "attachments": " | ".join(attachments),
         "attachment_count": len(attachments),
+        "image_attachments": chat_media.image_attachments(message_obj),
         "data_id": str(data_id),
         "raw_event": event,
     }
+
+
+def analyze_images(msg: dict) -> dict:
+    """Download + AI-analyze any image attachments. Best-effort: never raises.
+
+    Returns {"results": [...], "needs_review": bool, "reason": str, "summary": str}.
+    No-op (empty) unless ANTHROPIC_API_KEY is set and there are image attachments.
+    """
+    out = {"results": [], "needs_review": False, "reason": "", "summary": ""}
+    images = msg.get("image_attachments") or []
+    if not images or not vision.enabled():
+        return out
+    lines = []
+    for img in images[:5]:  # cap per message
+        try:
+            data = chat_media.download_attachment(img["resource_name"])
+            if not data:
+                continue
+            res = vision.analyze_image(data, img.get("content_type", "image/jpeg"),
+                                       context=f"Room: {msg.get('room_name')}. {msg.get('message','')}")
+            out["results"].append(res)
+            lines.append(f"📷 {res.get('doc_type','image')}: {res.get('summary','')}")
+            if res.get("needs_review"):
+                out["needs_review"] = True
+                out["reason"] = res.get("review_reason") or "image needs review"
+        except Exception as e:  # vision/network failure must never break ingest
+            print(f"[vision] error: {e}", flush=True)
+    out["summary"] = "\n".join(lines)
+    return out
 
 
 def ingest_live_event(event: dict, db_path: str = DB_PATH) -> dict:
@@ -130,42 +160,57 @@ def ingest_live_event(event: dict, db_path: str = DB_PATH) -> dict:
         return {"ok": True, "duplicate": True, "message_id": existing[0]["id"],
                 "reply": build_reply(msg, c, None, db_path)}
 
+    # AI image understanding (BOL/Veeder photos, etc.) — best-effort, gated on key.
+    vis = analyze_images(msg)
+    priority = "high" if vis["needs_review"] else c.priority
+    is_task = c.is_task or vis["needs_review"]
+
     now = datetime.now(timezone.utc).isoformat()
     message_doc = store.create("messages", {
         "seq": store.next_seq("messages"),
         "room_id": msg["room_id"], "room_name": msg["room_name"], "data_id": msg["data_id"],
         "sender": msg["sender"], "timestamp_raw": msg["timestamp_raw"], "message": msg["message"],
         "attachments": msg["attachments"], "attachment_count": msg["attachment_count"],
-        "categories": category_string(c.categories), "priority": c.priority,
-        "is_task": bool(c.is_task),
+        "categories": category_string(c.categories), "priority": priority,
+        "is_task": bool(is_task),
         "extracted_amounts": json.dumps(c.extracted_amounts),
         "extracted_gallons": json.dumps(c.extracted_gallons),
         "extracted_prices": json.dumps(c.extracted_prices),
         "assigned_hint": c.assigned_hint, "fingerprint": c.fingerprint,
         "confidence": c.confidence, "is_duplicate": False, "created_at": now,
+        "vision_summary": vis["summary"], "vision": json.dumps(vis["results"]),
     })
     message_id = message_doc["id"]
 
     task_id = None
-    if c.is_task or c.priority == "high":
+    if is_task or priority == "high":
+        title = (f"REVIEW: {vis['reason']}" if vis["needs_review"] else c.task_title)
+        body = msg["message"][:4000]
+        if vis["summary"]:
+            body = (body + "\n" + vis["summary"]).strip()[:4000]
         task_id = store.next_seq("tasks")
         store.create("tasks", {
             "id": task_id, "message_id": message_id, "room_name": msg["room_name"],
-            "sender": msg["sender"], "task_title": c.task_title, "task_text": msg["message"][:4000],
-            "category": category, "priority": c.priority, "assigned_hint": c.assigned_hint,
+            "sender": msg["sender"], "task_title": title, "task_text": body,
+            "category": ("bol_veeder_review" if vis["needs_review"] else category),
+            "priority": priority, "assigned_hint": c.assigned_hint,
             "assignee": c.assigned_hint, "status": "open", "source_fingerprint": c.fingerprint,
             "confidence": c.confidence, "created_at": now, "updated_at": now,
         }, doc_id=str(task_id))
 
+    reply = build_reply(msg, c, task_id, db_path)
+    if vis["summary"]:
+        reply = (reply + "\n" + vis["summary"]).strip()
     return {
         "ok": True,
         "duplicate": False,
         "message_id": message_id,
         "task_id": task_id,
-        "priority": c.priority,
+        "priority": priority,
         "categories": c.categories,
-        "is_task": c.is_task,
-        "reply": build_reply(msg, c, task_id, db_path),
+        "is_task": is_task,
+        "vision": vis["results"],
+        "reply": reply,
     }
 
 
