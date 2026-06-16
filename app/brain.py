@@ -173,6 +173,18 @@ _READ_TOOLS = [
         },
     },
     {
+        "name": "get_reports",
+        "description": "Get extracted daily/closing report figures — fuel gallons sold, "
+                       "inside (store) sales, fuel sales, total sales — read from report "
+                       "photos. Optionally filter by store. Use for questions about volumes, "
+                       "sales numbers, or daily report data.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"store": {"type": "string", "description": "Optional store name/number to filter by"}},
+            "required": [],
+        },
+    },
+    {
         "name": "find_tasks",
         "description": "Search OPEN tasks by keywords (store, issue type, words from the "
                        "user's message) to find the specific task the user means in plain "
@@ -218,6 +230,25 @@ def _run_tool(name: str, args: dict, sender: str = "") -> str:
     try:
         if name == "remember_preference":
             return _save_pref(sender, str(args.get("preference", "")))
+        if name == "get_reports":
+            rows = store.list_all("day_reports")
+            store_q = str(args.get("store", "")).lower().strip()
+            if store_q:
+                rows = [r for r in rows if store_q in (r.get("room_name") or "").lower()]
+            if not rows:
+                return ("No daily-report figures available yet. (Report photos may not be "
+                        "scanned, or none posted for that store.)")
+            rows = sorted(rows, key=lambda r: r.get("report_date") or "", reverse=True)[:30]
+            out = []
+            for r in rows:
+                parts = [f"{r.get('room_name')}"]
+                if r.get("report_date"): parts.append(f"date {r['report_date']}")
+                if r.get("fuel_gallons_sold") is not None: parts.append(f"{r['fuel_gallons_sold']} gal")
+                if r.get("inside_sales") is not None: parts.append(f"inside ${r['inside_sales']}")
+                if r.get("fuel_sales") is not None: parts.append(f"fuel ${r['fuel_sales']}")
+                if r.get("total_sales") is not None: parts.append(f"total ${r['total_sales']}")
+                out.append(" · ".join(parts))
+            return "\n".join(out)
         if name == "find_tasks":
             terms = str(args.get("query", "")).lower().split()
             hits = []

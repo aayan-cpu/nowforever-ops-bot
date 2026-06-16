@@ -46,6 +46,9 @@ _SCHEMA = {
         "report_date": {"type": ["string", "null"], "description": "Date on a daily/shift/closing report, else null."},
         "shift": {"type": ["string", "null"], "description": "Shift label (day/night/1/2) on a report, else null."},
         "total_sales": {"type": ["number", "null"], "description": "Total sales $ on a day report, else null."},
+        "inside_sales": {"type": ["number", "null"], "description": "Daily INSIDE/store sales $ (merchandise, non-fuel), else null."},
+        "fuel_gallons_sold": {"type": ["number", "null"], "description": "Total fuel GALLONS sold/dispensed on a day report, else null."},
+        "fuel_sales": {"type": ["number", "null"], "description": "Fuel sales $ on a day report, else null."},
         "amounts": {"type": "array", "items": {"type": "string"}, "description": "Dollar amounts seen."},
         "gallons": {"type": "array", "items": {"type": "string"}, "description": "Any gallon figures seen."},
         "prices": {"type": "array", "items": {"type": "string"}, "description": "Per-gallon prices seen."},
@@ -53,7 +56,8 @@ _SCHEMA = {
         "model_flagged_issue": {"type": "boolean", "description": "Does the image show a problem worth a human review (missing/blank fields, math that doesn't add up, damage, error, outage, anomaly)?"},
     },
     "required": ["doc_type", "summary", "bol_gallons", "veeder_gallons",
-                 "report_date", "shift", "total_sales",
+                 "report_date", "shift", "total_sales", "inside_sales",
+                 "fuel_gallons_sold", "fuel_sales",
                  "amounts", "gallons", "prices", "site_hint", "model_flagged_issue"],
     "additionalProperties": False,
 }
@@ -63,9 +67,10 @@ _PROMPT = (
     "image from a station chat and extract the structured fields.\n"
     "- Bill of Lading (BOL): read the TOTAL gallons delivered into bol_gallons.\n"
     "- Veeder-Root tank monitor reading: read the gallons into veeder_gallons.\n"
-    "- Daily / shift / closing report (doc_type='day_report'): read report_date, "
-    "shift, and total_sales; capture key dollar amounts; set model_flagged_issue=true "
-    "if required fields are blank/missing or the totals don't add up.\n"
+    "- Daily / shift / closing report (doc_type='day_report'): read report_date, shift, "
+    "total_sales, inside_sales (store/merchandise sales $), fuel_sales ($), and "
+    "fuel_gallons_sold (total gallons dispensed). Capture key dollar amounts; set "
+    "model_flagged_issue=true if required fields are blank/missing or totals don't add up.\n"
     "Always capture any dollar amounts, gallon figures, and per-gallon prices you see, "
     "and the store/site if visible. Be precise with numbers; if unsure, use null. "
     "Respond only with the structured data."
