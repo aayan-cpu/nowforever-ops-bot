@@ -10,6 +10,7 @@ from app.reports import (
     render_dashboard_html, render_tasks_html, render_alerts_html, render_room_html
 )
 from app.chat_live import handle_google_chat_event, ingest_live_event, google_chat_response
+from app import digests
 
 # Kept for backward compat with callers/tests; data now lives in Firestore (app/store.py).
 DB_PATH = os.getenv("OPS_DB_PATH", "data/ops_bot.sqlite3")
@@ -84,6 +85,16 @@ class OpsHandler(BaseHTTPRequestHandler):
                     event = {"type": "MESSAGE", "text": raw_body}
                 response = handle_google_chat_event(event, DB_PATH)
                 return send_json(self, response)
+
+            # Scheduled briefings/reminders, triggered by Cloud Scheduler.
+            # Protected by a shared token header so only the scheduler can fire them.
+            if len(parts) >= 2 and parts[0] == "cron":
+                if self.headers.get("X-Cron-Token", "") != os.getenv("OPS_CRON_TOKEN", ""):
+                    return send_json(self, {"error": "unauthorized"}, 401)
+                fn = digests.JOBS.get(parts[1])
+                if not fn:
+                    return send_json(self, {"error": "unknown job", "jobs": list(digests.JOBS)}, 404)
+                return send_json(self, fn())
 
             # Local/test ingestion endpoint. Useful before wiring Google Chat.
             if path == "/chat/test":

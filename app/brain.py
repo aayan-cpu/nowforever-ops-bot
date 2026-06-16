@@ -77,31 +77,92 @@ def _snapshot(room_name: str | None) -> str:
     return "\n".join(lines) if lines else "(no ops data available)"
 
 
+# Action tools the brain can call — only offered to admins, since they change state.
+_TOOLS = [
+    {
+        "name": "close_task",
+        "description": "Close/resolve an open task by its numeric id.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"task_id": {"type": "integer", "description": "The task number, e.g. 868"}},
+            "required": ["task_id"],
+        },
+    },
+    {
+        "name": "assign_task",
+        "description": "Assign an open task to a person by task id.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "integer"},
+                "assignee": {"type": "string", "description": "Who to assign it to, e.g. 'Moin' or '@Admin 4'"},
+            },
+            "required": ["task_id", "assignee"],
+        },
+    },
+]
+
+
+def _run_tool(name: str, args: dict) -> str:
+    from app import reports
+    try:
+        if name == "close_task":
+            r = reports.task_action(None, int(args["task_id"]), "close")
+            return f"Closed task #{args['task_id']}." if r.get("ok") else f"Failed: {r.get('error')}"
+        if name == "assign_task":
+            r = reports.task_action(None, int(args["task_id"]), "assign", str(args.get("assignee", "")))
+            return (f"Assigned task #{args['task_id']} to {args.get('assignee')}."
+                    if r.get("ok") else f"Failed: {r.get('error')}")
+    except Exception as e:
+        return f"Tool error: {e}"
+    return f"Unknown tool {name}"
+
+
+def _call_claude(messages: list, tools: list | None) -> dict:
+    body = {
+        "model": MODEL,
+        "max_tokens": 800,
+        "system": [{"type": "text", "text": PERSONA, "cache_control": {"type": "ephemeral"}}],
+        "messages": messages,
+    }
+    if tools:
+        body["tools"] = tools
+    req = urllib.request.Request(ENDPOINT, data=json.dumps(body).encode(), headers={
+        "x-api-key": os.environ[API_KEY_ENV],
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    })
+    return json.loads(urllib.request.urlopen(req, context=_ctx, timeout=45).read())
+
+
 def answer(user_msg: str, room_name: str | None, sender: str, is_admin: bool) -> str | None:
-    """Return Claude's natural-language reply, or None on failure (caller falls back)."""
+    """Return Claude's reply, executing close/assign tools if it requests them
+    (admins only). Returns None on failure so the caller can fall back."""
     if not enabled() or not (user_msg or "").strip():
         return None
     snapshot = _snapshot(room_name)
     user_block = (
         f"OPS DATA (current):\n{snapshot}\n\n"
         f"---\nUser ({sender}{', admin' if is_admin else ''}) in "
-        f"room '{room_name or 'DM'}' asks:\n{user_msg}"
+        f"room '{room_name or 'DM'}' says:\n{user_msg}"
     )
-    body = {
-        "model": MODEL,
-        "max_tokens": 700,
-        "system": [{"type": "text", "text": PERSONA, "cache_control": {"type": "ephemeral"}}],
-        "messages": [{"role": "user", "content": user_block}],
-    }
-    req = urllib.request.Request(ENDPOINT, data=json.dumps(body).encode(), headers={
-        "x-api-key": os.environ[API_KEY_ENV],
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-    })
+    messages = [{"role": "user", "content": user_block}]
+    tools = _TOOLS if is_admin else None  # only admins can mutate tasks
     try:
-        resp = json.loads(urllib.request.urlopen(req, context=_ctx, timeout=40).read())
-        text = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
-        return text.strip() or None
+        for _ in range(4):  # tool-use loop
+            resp = _call_claude(messages, tools)
+            if resp.get("stop_reason") == "tool_use":
+                messages.append({"role": "assistant", "content": resp["content"]})
+                results = []
+                for block in resp["content"]:
+                    if block.get("type") == "tool_use":
+                        out = _run_tool(block["name"], block.get("input", {}))
+                        results.append({"type": "tool_result", "tool_use_id": block["id"], "content": out})
+                messages.append({"role": "user", "content": results})
+                continue
+            text = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
+            return text.strip() or None
+        return None
     except urllib.error.HTTPError as e:
         print(f"[brain] {e.code}: {e.read().decode()[:200]}", flush=True)
         return None

@@ -104,6 +104,23 @@ def download_attachment(resource_name: str) -> bytes | None:
         return None
 
 
+def post_to_space(space: str, text: str) -> bool:
+    """Proactively post a message to a Chat space (for digests/alerts)."""
+    tok = get_chat_token()
+    if not tok or not space or not text:
+        return False
+    url = f"https://chat.googleapis.com/v1/{space}/messages"
+    body = json.dumps({"text": text[:3900]}).encode()
+    req = urllib.request.Request(url, data=body, headers={
+        "Authorization": f"Bearer {tok}", "Content-Type": "application/json"})
+    try:
+        urllib.request.urlopen(req, context=_ctx, timeout=20).read()
+        return True
+    except Exception as e:
+        print(f"[post] {space} error: {e}", flush=True)
+        return False
+
+
 def image_attachments(message_obj: dict) -> list[dict]:
     """Return [{resource_name, content_type, name}] for image attachments on a Chat message."""
     out = []

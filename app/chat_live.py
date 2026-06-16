@@ -202,6 +202,16 @@ def ingest_live_event(event: dict, db_path: str = DB_PATH) -> dict:
             "confidence": c.confidence, "created_at": now, "updated_at": now,
         }, doc_id=str(task_id))
 
+    # Instant high-priority alert: DM the owner the moment something urgent lands.
+    if (priority == "high" and task_id
+            and os.getenv("OPS_INSTANT_ALERTS", "true").lower() in {"1", "true", "yes"}):
+        try:
+            chat_media.post_to_space(
+                os.getenv("OPS_ADMIN_DM_SPACE", "spaces/6AxGNyAAAAE"),
+                f"🚨 New high-priority #{task_id} [{msg['room_name']}]\n{title}")
+        except Exception as e:
+            print(f"[alert] {e}", flush=True)
+
     cmd = build_reply(msg, c, task_id, db_path)
     reply = cmd if cmd is not None else default_ack(msg, c, task_id)
     if vis["summary"]:
