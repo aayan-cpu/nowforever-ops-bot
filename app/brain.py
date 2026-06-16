@@ -33,9 +33,18 @@ PERSONA = (
     "TALK LIKE A SMART HUMAN COLLEAGUE OVER TEXT — never like a database or a robot.\n"
     "- Be natural and conversational. Use real sentences. Do NOT dump templated, "
     "bracketed lists like '#2224 [24 Galveston]'. That reads as robotic.\n"
-    "- Don't lead with raw ID numbers or '#'. Refer to issues in plain language — 'the gas "
-    "delivery at Galveston', 'Windchase's power outage'. Only mention a task number when the "
-    "person would actually act on it, and tuck it in naturally, e.g. '(task 2224)'.\n"
+    "- IDENTIFY ISSUES BY MEANING, NOT NUMBERS. Refer to each issue by its store, type, and "
+    "a short description — 'the gas delivery at Galveston', 'Windchase's power outage', 'the "
+    "AC at 24'. Do NOT show task ID numbers at all unless the user explicitly asks for an ID. "
+    "Internally the issues have numbers (you need them for tools), but keep them out of what "
+    "you say.\n"
+    "- ORGANIZE BY CATEGORY. Group related issues by type (Fuel/deliveries, Equipment, Power, "
+    "Reports, Cash/deposits, Compliance) and by store, most urgent first. Think in categories, "
+    "not a flat numbered list.\n"
+    "- When the user refers to an issue in plain language ('close the AC at Galveston', "
+    "'assign the printer problem at 16'), use find_tasks to resolve it to the real task, do "
+    "the action, and confirm in plain language ('Done — closed the AC issue at Galveston'). "
+    "Never make the user type a number.\n"
     "- Only use a bullet list when you're genuinely listing several things and it helps; "
     "otherwise write in flowing sentences. Keep it tight — this is Google Chat.\n"
     "- No markdown headers (#), tables, or code blocks — Chat doesn't render them.\n"
@@ -146,6 +155,19 @@ _READ_TOOLS = [
             "required": ["site"],
         },
     },
+    {
+        "name": "find_tasks",
+        "description": "Search OPEN tasks by keywords (store, issue type, words from the "
+                       "user's message) to find the specific task the user means in plain "
+                       "language. Use this to resolve references like 'the AC at Galveston' "
+                       "or 'the printer issue at 16' into the actual task BEFORE closing or "
+                       "assigning it — so the user never has to type an ID number.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "Keywords: store + issue, e.g. 'galveston ac' or 'printer 16'"}},
+            "required": ["query"],
+        },
+    },
 ]
 
 # Action tools — only offered to admins, since they change state.
@@ -179,6 +201,19 @@ def _run_tool(name: str, args: dict, sender: str = "") -> str:
     try:
         if name == "remember_preference":
             return _save_pref(sender, str(args.get("preference", "")))
+        if name == "find_tasks":
+            terms = str(args.get("query", "")).lower().split()
+            hits = []
+            for t in reports.open_tasks(limit=400):
+                hay = f"{t.get('room_name','')} {t.get('task_title','')} {t.get('task_text','')} {t.get('category','')}".lower()
+                if all(term in hay for term in terms):
+                    hits.append(t)
+            if not hits:
+                return "No matching open tasks."
+            return "\n".join(
+                f"{t.get('room_name')} | {t.get('category')} | "
+                f"{t.get('task_title') or t.get('task_text')} (id {t['id']}, {t.get('priority')})"
+                for t in hits[:12])
         if name == "lookup_site":
             rs = reports.room_summary(None, str(args.get("site", "")))
             s = rs.get("stats")
