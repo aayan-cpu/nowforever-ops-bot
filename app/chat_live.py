@@ -254,6 +254,7 @@ def ingest_live_event(event: dict, db_path: str = DB_PATH) -> dict:
         "categories": c.categories,
         "is_task": is_task,
         "vision": vis["results"],
+        "vision_summary": vis["summary"],
         "reply": reply,
         "command_matched": cmd is not None,
         "text": msg["message"],
@@ -413,7 +414,7 @@ def handle_google_chat_event(event: dict, db_path: str = DB_PATH) -> dict:
     if will_reply and not result.get("command_matched") and brain.enabled():
         ai = brain.answer(result.get("text", ""), result.get("room_name"),
                           result.get("sender", "unknown"), is_admin(result.get("sender", "")),
-                          space_id=result.get("space_id"))
+                          space_id=result.get("space_id"), image_note=result.get("vision_summary", ""))
         if ai:
             reply = ai
 

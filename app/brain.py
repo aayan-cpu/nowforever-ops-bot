@@ -307,7 +307,7 @@ def _save_turn(space_id: str | None, user_text: str, assistant_text: str) -> Non
 
 
 def answer(user_msg: str, room_name: str | None, sender: str, is_admin: bool,
-           space_id: str | None = None) -> str | None:
+           space_id: str | None = None, image_note: str = "") -> str | None:
     """Return Claude's reply, executing close/assign tools if it requests them
     (admins only), with short-term memory of the last few turns in this space.
     Returns None on failure so the caller can fall back."""
@@ -317,10 +317,12 @@ def answer(user_msg: str, room_name: str | None, sender: str, is_admin: bool,
     prefs = _load_prefs(sender)
     prefs_block = ("\nThis user's saved preferences (honor them):\n" +
                    "\n".join(f"- {p}" for p in prefs) + "\n") if prefs else ""
+    image_block = (f"\nThe user attached photo(s); your vision system already read them:\n"
+                   f"{image_note}\nIncorporate this into your reply naturally.\n") if image_note else ""
     user_block = (
         f"RIGHT NOW it is {now_central()} (Texas time). Use this for any 'today', "
         f"'this week', 'overdue', or 'how long ago' reasoning.\n\n"
-        f"OPS DATA (current):\n{snapshot}\n{prefs_block}\n"
+        f"OPS DATA (current):\n{snapshot}\n{prefs_block}{image_block}\n"
         f"---\nUser ({sender}{', admin' if is_admin else ''}) in "
         f"room '{room_name or 'DM'}' says:\n{user_msg}"
     )
