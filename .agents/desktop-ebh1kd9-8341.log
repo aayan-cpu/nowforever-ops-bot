@@ -3,3 +3,5 @@
 2026-06-17T15:44:04Z ready for review: feat/site-normalization__desktop-ebh1kd9-8341 (app/sites.py canonical resolver + room_summary wiring, 18 tests, full suite green)
 2026-06-17T15:48:02Z ready for review: feat/dead-commands__desktop-ebh1kd9-8341 (report/reports + help recognized, no blank-ack, 15 tests, suite 92 green)
 2026-06-17T15:48:02Z heartbeat (desktop-ebh1kd9-8341)
+2026-06-17T15:50:12Z ready for review: feat/bol-veeder-reconcile__desktop-ebh1kd9-8341 (app/reconcile.py cross-event BOL/Veeder mismatch detection, 14 tests, suite 110 green)
+2026-06-17T15:50:12Z heartbeat (desktop-ebh1kd9-8341)
