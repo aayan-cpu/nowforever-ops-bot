@@ -65,23 +65,25 @@ Google Chat API (HTTP webhook)
         |
         v
 Cloud Run Service (nowforever-chat-ops)
-    +---+-------------------------------+
-    |  app/server.py  (FastAPI)         |
-    |  app/classifier.py                |
-    |  app/task_manager.py              |
-    |  app/alert_detector.py            |
-    +---+-------------------------------+
+    +---+----------------------------------------+
+    |  app/server.py    (stdlib http.server)     |
+    |  app/chat_live.py (live Chat event handlers)|
+    |  app/classifier.py (classify + urgency)    |
+    |  app/brain.py     (Claude conversational AI)|
+    |  app/digests.py   (scheduled briefings)    |
+    +---+----------------------------------------+
         |
         v
-   SQLite DB (ops_bot.sqlite3)
+   Firestore  (app/store.py, REST API)
+   (SQLite app/database.py is used only for the offline Vault ingest)
         |
         v
    Web Dashboard (http://host:8000/dashboard)
 ```
 
 **Tech Stack:**
-- Python 3.x (FastAPI, minimal deps — see Limitations)
-- SQLite for task/message persistence
+- Python 3.x (stdlib `http.server`, minimal deps — see Limitations; intentionally no FastAPI/uvicorn)
+- Firestore (REST API) for live task/message persistence; SQLite only for the offline Vault ingest
 - Google Cloud Run (serverless deployment)
 - Google Chat API (HTTP endpoint connection)
 - Google Vault (historical data export source)
@@ -139,7 +141,7 @@ Once the bot is live in a Google Chat room, tag it with:
 | AAAA3s2JArA | 12 S Main Stafford |
 | AAAAox_RoBo | 27 Fry |
 
-Full mapping for all 22+ rooms is maintained in `app/room_mappings.py`.
+Room→space mappings are configured via environment variables (e.g. `OPS_ALL_CAPTAINS_SPACE`) and resolved in `app/digests.py` / `app/chat_live.py`, so spaces can be retargeted without a code change. There is no static `room_mappings.py` module.
 
 ---
 
