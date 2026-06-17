@@ -253,8 +253,15 @@ def sync_messages() -> dict:
     return {"ok": res.get("ingested", 0) >= 0, "kind": "sync_messages", **res}
 
 
+def remap_rooms() -> dict:
+    """Re-label messages stored under a raw space id to the friendly room name."""
+    from app import sync
+    return {"ok": True, "kind": "remap_rooms", **sync.remap_space_ids()}
+
+
 JOBS = {
     "sync": sync_messages,
+    "remap-rooms": remap_rooms,
     "morning-digest": morning_digest,
     "urgent-reminder": urgent_reminder,
     "missing-reports": missing_reports,

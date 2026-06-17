@@ -42,12 +42,14 @@ def list_recent_messages(space: str, token: str, n: int = 25) -> list[dict]:
         return []
 
 
-def to_event(space: str, m: dict) -> dict:
-    """Map a Chat API Message resource to the webhook event shape ingest expects."""
+def to_event(space: str, m: dict, display_name: str | None = None) -> dict:
+    """Map a Chat API Message resource to the webhook event shape ingest expects.
+    `display_name` is the room's friendly name so room_name resolves to e.g.
+    '14 Synott' instead of the raw space id."""
     sender = m.get("sender") or {}
     return {
         "type": "MESSAGE",
-        "space": {"name": space},
+        "space": {"name": space, "displayName": display_name or None},
         "message": {
             "name": m.get("name"),
             "text": m.get("text") or m.get("argumentText") or m.get("formattedText") or "",
@@ -80,7 +82,7 @@ def sync_once(per_room: int = 25, max_new_per_room: int = 40) -> dict:
         return {"spaces": len(spaces), "scanned": 0, "ingested": 0,
                 "errors": 0, "note": "no spaces or no read token"}
 
-    for space, _name in spaces:
+    for space, name in spaces:
         msgs = list_recent_messages(space, read_tok, per_room)
         new_here = 0
         # oldest-first so tasks/threads land in chronological order
@@ -89,7 +91,7 @@ def sync_once(per_room: int = 25, max_new_per_room: int = 40) -> dict:
             if _already_have(m.get("name")):
                 continue
             try:
-                ingest_live_event(to_event(space, m), analyze=False)  # text-only: fast + cheap
+                ingest_live_event(to_event(space, m, name), analyze=False)  # text-only: fast + cheap
                 ingested += 1
                 new_here += 1
                 if new_here >= max_new_per_room:
@@ -101,3 +103,21 @@ def sync_once(per_room: int = 25, max_new_per_room: int = 40) -> dict:
               "ingested": ingested, "errors": errors}
     print(f"[sync] {result}", flush=True)
     return result
+
+
+def remap_space_ids() -> dict:
+    """Maintenance: messages synced before display names were captured got
+    room_name = the raw 'spaces/...' id. Re-label them to the room's friendly name."""
+    name_by_id = {sid: nm for sid, nm in chat_media.list_bot_spaces()
+                  if nm and not nm.startswith("spaces/")}
+    fixed = 0
+    for m in store.list_all("messages"):
+        rn = m.get("room_name") or ""
+        if rn.startswith("spaces/") and rn in name_by_id:
+            try:
+                store.patch("messages", m["id"], {"room_name": name_by_id[rn]})
+                fixed += 1
+            except Exception as e:
+                print(f"[remap] {m.get('id')}: {e}", flush=True)
+    print(f"[remap] fixed {fixed} of {len(name_by_id)} rooms", flush=True)
+    return {"fixed": fixed, "named_rooms": len(name_by_id)}
