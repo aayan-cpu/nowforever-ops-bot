@@ -94,10 +94,11 @@ PERSONA = (
     "store, what each room is for (store chat vs all-captains vs marketing), who is active "
     "in each store (likely works there), and who the admins/managers are — for any "
     "'who works at X', 'who's the manager', or 'who is <person>' question.\n"
-    "- When the user asks about a specific issue/message ('where did Annus mention SSCS', "
-    "'show me where they said the pumps are down'), use search_history. Quote who said it "
-    "and when, and include the 🔗 link it returns so they can open that store's chat (the "
-    "link opens the room, not the exact line — the sender + date help them find it).\n"
+    "- When you discuss a store's issues (e.g. 'what's happening at X'), include for each "
+    "issue WHEN it was reported (the date/time shown in the tool results) and a 🔗 link to "
+    "that store's chat. For 'where did <person> say <thing>' use search_history and quote "
+    "who said it + when, with the 🔗 link. Always give the date/time and the link — the "
+    "link opens the store chat (not the exact line), so the date + who-said-it help locate it.\n"
     "- You can act: close or assign tasks directly when asked — just do it and confirm "
     "naturally."
 )
@@ -426,17 +427,26 @@ def store_chat_spaces() -> list:
     return [(sp, rn) for sp, rn in store_room_spaces() if sites.is_station(rn)]
 
 
+def _room_link(room_id: str = "", room_name: str = "", is_dm: bool = False) -> str:
+    """Google Chat link to a conversation. Prefers Google's OWN spaceUri (reliable —
+    opens the actual chat); falls back to a constructed URL."""
+    try:
+        from app import chat_media
+        m = chat_media.space_uri_map()
+        uri = m.get(room_id) or m.get(room_name)
+        if uri:
+            return uri
+    except Exception:
+        pass
+    space = (room_id or "").replace("spaces/", "").strip()
+    if space and "/" not in space and not space.startswith(("live-", "Direct")):
+        return f"https://chat.google.com/{'dm' if is_dm else 'room'}/{space}"
+    return ""
+
+
 def _message_link(m: dict) -> str:
-    """Link to the Google Chat conversation a stored message is in (room or DM).
-    We link the ROOM, not the exact message: Chat doesn't reliably deep-link to a
-    single message (the message-id URL opens an empty thread), but the room link
-    always opens the right store chat. Paired with the sender+date+snippet so it's
-    easy to find the exact line."""
-    space = (m.get("room_id") or "").replace("spaces/", "").strip()
-    if not space or "/" in space or space.startswith(("live-", "Direct")):
-        return ""
-    kind = "dm" if m.get("is_dm") else "room"
-    return f"https://chat.google.com/{kind}/{space}"
+    """Link to the Google Chat conversation a stored message is in (room or DM)."""
+    return _room_link(m.get("room_id", ""), m.get("room_name", ""), bool(m.get("is_dm")))
 
 
 def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> str:
@@ -601,9 +611,13 @@ def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> st
             s = rs.get("stats")
             if not s:
                 return f"No data found for site '{args.get('site')}'."
-            out = [f"{s['room_name']}: {s['messages']} msgs, {s['tasks']} task-msgs, {s['high']} high-priority."]
+            link = _room_link(room_name=s["room_name"])
+            out = [f"{s['room_name']}: {s['messages']} msgs, {s['tasks']} task-msgs, {s['high']} high-priority."
+                   + (f"  🔗 {link}" if link else "")]
             for t in rs.get("open_tasks", [])[:12]:
-                out.append(f"#{t['id']} ({t.get('priority')}) {t.get('task_title') or t.get('task_text')}")
+                when = reports.fmt_ts(t.get("sent_at") or t.get("created_at"))
+                out.append(f"#{t['id']} ({t.get('priority')}) {t.get('task_title') or t.get('task_text')}"
+                           + (f"  — {when}" if when else ""))
             return "\n".join(out)
         if name == "close_task":
             r = reports.task_action(None, int(args["task_id"]), "close")

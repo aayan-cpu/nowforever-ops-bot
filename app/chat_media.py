@@ -260,6 +260,46 @@ def list_bot_spaces() -> list:
     return out
 
 
+_space_uri_cache: dict = {"map": {}, "exp": 0}
+
+
+def space_uri_map() -> dict:
+    """{space_name AND display_name -> spaceUri} for every space the bot is in
+    (rooms + DMs). spaceUri is Google's OWN clickable URL for the space — the
+    reliable way to link to a conversation (constructing the URL by hand opens an
+    empty thread). Cached ~10 min."""
+    now = time.time()
+    if _space_uri_cache["map"] and now < _space_uri_cache["exp"]:
+        return _space_uri_cache["map"]
+    tok = get_chat_token()
+    if not tok:
+        return _space_uri_cache["map"]
+    m, page = {}, ""
+    try:
+        while True:
+            url = "https://chat.googleapis.com/v1/spaces?pageSize=100"
+            if page:
+                url += "&pageToken=" + page
+            req = urllib.request.Request(url, headers={"Authorization": f"Bearer {tok}"})
+            data = json.loads(urllib.request.urlopen(req, context=_ctx, timeout=20).read())
+            for s in data.get("spaces", []):
+                uri = s.get("spaceUri")
+                if uri:
+                    if s.get("name"):
+                        m[s["name"]] = uri
+                    if s.get("displayName"):
+                        m[s["displayName"]] = uri
+            page = data.get("nextPageToken", "")
+            if not page:
+                break
+    except Exception as e:
+        print(f"[chat] space_uri_map: {e}", flush=True)
+        return _space_uri_cache["map"]
+    if m:
+        _space_uri_cache["map"], _space_uri_cache["exp"] = m, now + 600
+    return m
+
+
 def image_attachments(message_obj: dict) -> list[dict]:
     """Return [{resource_name, content_type, name}] for image attachments on a Chat message."""
     out = []
