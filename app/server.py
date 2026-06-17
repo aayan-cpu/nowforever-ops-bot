@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 from app.reports import (
@@ -41,6 +41,11 @@ class OpsHandler(BaseHTTPRequestHandler):
         qs = parse_qs(parsed.query)
         want_json = qs.get("format", [""])[0] == "json" or path.startswith("/api/")
         try:
+            # Cheap liveness probe — point the Cloud Run uptime check here.
+            # Returns immediately without touching Firestore so a busy worker
+            # thread or slow datastore can never make the service look "down".
+            if path in {"/healthz", "/_ah/health"}:
+                return send_json(self, {"ok": True})
             if path == "/" or path == "/dashboard":
                 return send_json(self, dashboard(DB_PATH)) if want_json else send_html(self, render_dashboard_html(DB_PATH))
             if path == "/tasks":
@@ -131,7 +136,9 @@ def run(host: str | None = None, port: int | None = None):
     print(f"Now & Forever Chat Ops v3 running at http://{host}:{port}")
     print("Dashboard: /dashboard  Tasks: /tasks  Alerts: /alerts")
     print("Google Chat endpoint: /chat/events")
-    HTTPServer((host, port), OpsHandler).serve_forever()
+    # Threaded: a slow Claude call (up to 45s) on one request must not block
+    # health checks or other users. ThreadingHTTPServer sets daemon_threads=True.
+    ThreadingHTTPServer((host, port), OpsHandler).serve_forever()
 
 
 if __name__ == "__main__":
