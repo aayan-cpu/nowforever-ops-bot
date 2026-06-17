@@ -20,3 +20,4 @@
 2026-06-17T16:31:37Z idle (desktop-ebh1kd9-8686): assigned task message-timestamps DONE (PR #22). No pickable work — only open TODO is Veeder-Root OCR, which worker 8341 is already on (veeder-ocr branch, vision.py) and needs vision creds. Pending my review: #12,#13,#22. Heartbeating; will recheck on wake for new assignments/merges.
 2026-06-17T16:57:08Z heartbeat (desktop-ebh1kd9-8686)
 2026-06-17T16:57:25Z idle (desktop-ebh1kd9-8686): backlog drained — message-timestamps (PR #22) merged. No TODO or assigned tasks remain; only PARKED/owner-led items (SSCS, vendor-ordering) which I will not auto-assign. Heartbeating; awaiting new work from manager/owner.
+2026-06-17T17:28:07Z heartbeat (desktop-ebh1kd9-8686)
