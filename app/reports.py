@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import html
+import json
+import os
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app import store, sites
 
@@ -132,6 +134,119 @@ def missing_daily_reports(as_of: str | None = None, overdue_days: int = OVERDUE_
     (defaults to today, UTC)."""
     as_of = as_of or datetime.now(timezone.utc).date().isoformat()
     return report_status(store.list_all("messages"), as_of, overdue_days)
+
+
+# --- Report cutoff / late flagging ---------------------------------------
+# Stations are expected to post their daily report by a local-time cutoff. A
+# report filed after it is "late"; once the cutoff passes with no report, the
+# station is "missing past cutoff". Default cutoff + per-site overrides via env.
+DEFAULT_CUTOFF = os.getenv("OPS_REPORT_CUTOFF", "22:00")
+
+
+def _site_cutoffs() -> dict[str, str]:
+    """Per-site cutoff overrides keyed by site_key, e.g. {"11": "21:30"}."""
+    raw = os.getenv("OPS_REPORT_CUTOFFS")
+    if not raw:
+        return {}
+    try:
+        d = json.loads(raw)
+        return {str(k): str(v) for k, v in d.items()} if isinstance(d, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
+def _central_offset_hours(utc_dt: datetime) -> int:
+    """US Central UTC offset (-5 CDT / -6 CST), DST-aware, dependency-free.
+    Mirrors the rule in brain.now_central (kept local to avoid a circular import)."""
+    y = utc_dt.year
+
+    def nth_sunday(month: int, n: int) -> int:
+        first = datetime(y, month, 1, tzinfo=timezone.utc)
+        return 1 + ((6 - first.weekday()) % 7) + (n - 1) * 7
+
+    dst_start = datetime(y, 3, nth_sunday(3, 2), 8, tzinfo=timezone.utc)
+    dst_end = datetime(y, 11, nth_sunday(11, 1), 7, tzinfo=timezone.utc)
+    return -5 if dst_start <= utc_dt < dst_end else -6
+
+
+def _cutoff_minutes(hhmm: str) -> int:
+    try:
+        h, m = hhmm.strip().split(":")
+        return int(h) * 60 + int(m)
+    except (ValueError, AttributeError):
+        return 22 * 60
+
+
+def _local_minutes(utc_dt: datetime) -> int:
+    """Minutes-since-midnight in US Central for a UTC datetime."""
+    local = utc_dt + timedelta(hours=_central_offset_hours(utc_dt))
+    return local.hour * 60 + local.minute
+
+
+def _parse_dt(s: str | None) -> datetime | None:
+    try:
+        dt = datetime.fromisoformat((s or "").replace("Z", "+00:00"))
+        return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
+def report_lateness(messages: list[dict], now_utc: datetime,
+                    cutoffs: dict[str, str] | None = None,
+                    default_cutoff: str = DEFAULT_CUTOFF) -> dict:
+    """Pure: classify each station's report for *today* (Central) against its
+    cutoff. Uses the message's send time (``timestamp_raw``/``created_at``).
+
+    Returns ``{as_of, on_time, late, missing_past_cutoff}`` where ``late`` is
+    ``[{site, filed, cutoff}]`` (HH:MM Central) and ``missing_past_cutoff`` is
+    ``[{site, cutoff}]`` for stations with no report once their cutoff has passed.
+    """
+    cutoffs = cutoffs or {}
+    today = (now_utc + timedelta(hours=_central_offset_hours(now_utc))).date().isoformat()
+    now_min = _local_minutes(now_utc)
+
+    # Latest report send-time today, per canonical site; and all seen stations.
+    seen: set[str] = set()
+    filed_min: dict[str, int] = {}
+    for m in messages:
+        rn = m.get("room_name") or ""
+        if not sites.is_station(rn):
+            continue
+        site = sites.canonical_name(rn)
+        seen.add(site)
+        if not _is_report(m):
+            continue
+        dt = _parse_dt(m.get("timestamp_raw") or m.get("created_at"))
+        if not dt:
+            continue
+        local = dt + timedelta(hours=_central_offset_hours(dt))
+        if local.date().isoformat() != today:
+            continue
+        mins = local.hour * 60 + local.minute
+        if mins > filed_min.get(site, -1):
+            filed_min[site] = mins
+
+    def _hhmm(mins: int) -> str:
+        return f"{mins // 60:02d}:{mins % 60:02d}"
+
+    on_time, late, missing = [], [], []
+    for site in sorted(seen):
+        cutoff = cutoffs.get(sites.site_key(site), default_cutoff)
+        cmin = _cutoff_minutes(cutoff)
+        if site in filed_min:
+            (late if filed_min[site] > cmin else on_time).append(
+                {"site": site, "filed": _hhmm(filed_min[site]), "cutoff": cutoff}
+                if filed_min[site] > cmin else site)
+        elif now_min >= cmin:  # window closed, nothing filed
+            missing.append({"site": site, "cutoff": cutoff})
+    return {"as_of": today, "on_time": on_time, "late": late,
+            "missing_past_cutoff": missing}
+
+
+def daily_report_lateness(now_utc: datetime | None = None) -> dict:
+    """Live entry point: report_lateness over stored messages, now, and env cutoffs."""
+    now_utc = now_utc or datetime.now(timezone.utc)
+    return report_lateness(store.list_all("messages"), now_utc, _site_cutoffs(), DEFAULT_CUTOFF)
 
 
 def room_summary(db_path: str | None, room: str) -> dict:

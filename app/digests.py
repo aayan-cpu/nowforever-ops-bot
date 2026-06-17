@@ -98,6 +98,25 @@ def report_reminder() -> dict:
     return {"ok": ok, "kind": "report_reminder", "missing": len(missing)}
 
 
+def late_reports() -> dict:
+    """After the cutoff — DM the admin which stations reported late today and
+    which blew past their cutoff with nothing posted. Quiet when all on time."""
+    status = reports.daily_report_lateness()
+    late, missing = status["late"], status["missing_past_cutoff"]
+    if not late and not missing:
+        return {"ok": True, "kind": "late_reports", "skipped": "all on time",
+                "late": 0, "missing": 0}
+    lines = ["⏱️ *Daily report timeliness:*"]
+    if late:
+        lines.append("\n*Late (filed after cutoff):*")
+        lines += [f"• {x['site']} — filed {x['filed']} (cutoff {x['cutoff']})" for x in late]
+    if missing:
+        lines.append("\n*Past cutoff, still missing:*")
+        lines += [f"• {x['site']} (cutoff {x['cutoff']})" for x in missing]
+    ok = chat_media.post_to_space(ADMIN_DM, "\n".join(lines))
+    return {"ok": ok, "kind": "late_reports", "late": len(late), "missing": len(missing)}
+
+
 def ceo_summary() -> dict:
     """Night — AI end-of-day summary, personalized per admin and DM'd to each."""
     targets = _admin_dms()
@@ -218,6 +237,7 @@ JOBS = {
     "urgent-reminder": urgent_reminder,
     "missing-reports": missing_reports,
     "report-reminder": report_reminder,
+    "late-reports": late_reports,
     "ceo-summary": ceo_summary,
     "weekly-report": weekly_report,
     "weekly-digest": weekly_digest,
