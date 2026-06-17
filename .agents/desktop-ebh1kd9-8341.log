@@ -1,3 +1,5 @@
 2026-06-17T15:36:52Z online (desktop-ebh1kd9-8341)
 2026-06-17T15:39:42Z ready for review: feat/tests-smoke__desktop-ebh1kd9-8341 (test suite, 65 green)
 2026-06-17T15:44:04Z ready for review: feat/site-normalization__desktop-ebh1kd9-8341 (app/sites.py canonical resolver + room_summary wiring, 18 tests, full suite green)
+2026-06-17T15:48:02Z ready for review: feat/dead-commands__desktop-ebh1kd9-8341 (report/reports + help recognized, no blank-ack, 15 tests, suite 92 green)
+2026-06-17T15:48:02Z heartbeat (desktop-ebh1kd9-8341)
