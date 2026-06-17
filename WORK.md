@@ -28,6 +28,8 @@
 
 
 
+- [ ] (PARKED) **SSCS integration** (TOP next priority) — see docs/FUTURE_INTEGRATIONS.md. Needs discovery first (how N&F updates the CDB: desktop keying vs POS poller/XML vs file import). Do NOT auto-assign; owner-led. mainly: docs/FUTURE_INTEGRATIONS.md + (future) app/sscs.py
+
 ## In progress
 
 <!-- claimed rows move here -->
