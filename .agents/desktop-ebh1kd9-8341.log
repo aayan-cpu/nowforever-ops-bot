@@ -13,3 +13,5 @@
 2026-06-17T15:59:16Z heartbeat (desktop-ebh1kd9-8341)
 2026-06-17T16:01:43Z ready for review: feat/scoped-roles__desktop-ebh1kd9-8341 (app/roles.py scoped role+permission+store-scope authority, 19 tests, suite 184 green)
 2026-06-17T16:01:44Z heartbeat (desktop-ebh1kd9-8341)
+2026-06-17T16:02:09Z status (desktop-ebh1kd9-8341): idle — 8 branches pushed for review (tests, site-norm, dead-commands, reconcile, receipt-ocr, docs-audit, site-aware-classifier, scoped-roles). All remaining TODOs are contested by active branches (brain.py/message-user, pos.py/pos-scaffold, docs x2). Waiting for merges or new unclaimed work.
+2026-06-17T16:02:09Z heartbeat (desktop-ebh1kd9-8341)
