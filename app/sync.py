@@ -22,6 +22,20 @@ from app import chat_media, store
 _ctx = ssl.create_default_context()
 _API = "https://chat.googleapis.com/v1"
 
+# The bot's own Chat user id — never ingest its own posts (broadcasts, digests,
+# alert DMs), or they loop back in as "alerts". Also matched by sender.type == BOT.
+BOT_USER_ID = os.getenv("OPS_BOT_USER_ID", "").strip()
+# Prefixes/phrases the bot uses in its own output — used to clean up self-echoes
+# that were ingested before the BOT filter existed.
+_BOT_PREFIXES = ("📢", "📊", "⏰", "🚨", "📋", "🏪", "📘")
+_BOT_PHRASES = ("Ops Bot is now LIVE", "Ops Briefing", "High Priority Alerts",
+                "Daily Summary", "Escalation —", "Stations missing")
+
+
+def _is_bot_message(sender_dict: dict) -> bool:
+    s = sender_dict or {}
+    return s.get("type") == "BOT" or (BOT_USER_ID and s.get("name") == BOT_USER_ID)
+
 
 def _api_get(url: str, token: str) -> dict:
     req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
@@ -89,6 +103,8 @@ def sync_once(per_room: int = 25, max_new_per_room: int = 40) -> dict:
         # oldest-first so tasks/threads land in chronological order
         for m in reversed(msgs):
             scanned += 1
+            if _is_bot_message(m.get("sender")):
+                continue  # never ingest the bot's own posts (would loop back as alerts)
             found = store.find("messages", "data_id", m.get("name"), limit=1)
             if found:
                 # Backfill OCR flag for image messages stored before refs were captured.
@@ -157,6 +173,30 @@ def ocr_pass(batch: int = 6) -> dict:
               "flagged": flagged, "errors": errors}
     print(f"[ocr] {result}", flush=True)
     return result
+
+
+def purge_bot_echo() -> dict:
+    """Downgrade the bot's OWN posts (broadcasts/digests/alerts) that the sync
+    re-ingested before the BOT filter existed, so they stop showing as alerts/tasks.
+    Matches by bot user id and by the bot's output prefixes/phrases."""
+    downgraded = 0
+    for m in store.list_all("messages"):
+        if m.get("is_duplicate"):
+            continue
+        sender = m.get("sender") or ""
+        txt = (m.get("message") or "").strip()
+        is_bot = (BOT_USER_ID and sender == BOT_USER_ID) \
+            or txt.startswith(_BOT_PREFIXES) \
+            or any(p in txt for p in _BOT_PHRASES)
+        if is_bot:
+            try:
+                store.patch("messages", m["id"],
+                            {"is_duplicate": True, "priority": "normal", "is_task": False})
+                downgraded += 1
+            except Exception as e:
+                print(f"[purge] {m.get('id')}: {e}", flush=True)
+    print(f"[purge] downgraded {downgraded} bot-echo messages", flush=True)
+    return {"downgraded": downgraded}
 
 
 def remap_space_ids() -> dict:

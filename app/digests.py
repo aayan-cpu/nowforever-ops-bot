@@ -296,10 +296,17 @@ def ocr_pass() -> dict:
     return {"ok": True, "kind": "ocr_pass", **sync.ocr_pass()}
 
 
+def purge_bot_echo() -> dict:
+    """Downgrade the bot's own re-ingested posts so they stop showing as alerts."""
+    from app import sync
+    return {"ok": True, "kind": "purge_bot_echo", **sync.purge_bot_echo()}
+
+
 JOBS = {
     "sync": sync_messages,
     "ocr-pass": ocr_pass,
     "remap-rooms": remap_rooms,
+    "purge-bot-echo": purge_bot_echo,
     "morning-digest": morning_digest,
     "urgent-reminder": urgent_reminder,
     "missing-reports": missing_reports,
