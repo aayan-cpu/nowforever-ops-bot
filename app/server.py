@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -14,6 +15,23 @@ from app import digests
 
 # Kept for backward compat with callers/tests; data now lives in Firestore (app/store.py).
 DB_PATH = os.getenv("OPS_DB_PATH", "data/ops_bot.sqlite3")
+
+
+# Dashboard views expose operational data (open tasks, alerts, per-room summaries).
+# Gate them behind a shared token when OPS_DASHBOARD_TOKEN is set. The token may be
+# supplied as ?token=<value> or the X-Ops-Token header. When the env var is unset or
+# empty, auth is DISABLED so the dashboards stay reachable until a token is
+# configured (mirrors the OPS_VERIFY_CHAT_TOKEN / OPS_CRON_TOKEN gating style — never
+# dark a live surface just because a secret hasn't been set yet).
+def dashboard_auth_ok(header_token: str | None, query_token: str | None) -> bool:
+    expected = os.getenv("OPS_DASHBOARD_TOKEN", "")
+    if not expected:
+        return True
+    for cand in (header_token, query_token):
+        # constant-time compare; skip None/empty so a missing token never matches.
+        if cand and hmac.compare_digest(cand, expected):
+            return True
+    return False
 
 
 def send_json(handler: BaseHTTPRequestHandler, data, status: int = 200):
@@ -46,6 +64,17 @@ class OpsHandler(BaseHTTPRequestHandler):
             # thread or slow datastore can never make the service look "down".
             if path in {"/healthz", "/_ah/health"}:
                 return send_json(self, {"ok": True})
+            # Gate the operational dashboard/data views behind OPS_DASHBOARD_TOKEN.
+            # Health, Google Chat, and cron endpoints are intentionally excluded
+            # (the latter two carry their own auth / must stay open for the bot).
+            dashboard_view = (
+                path in {"/", "/dashboard", "/tasks", "/alerts", "/api/dashboard"}
+                or path.startswith("/rooms/")
+            )
+            if dashboard_view and not dashboard_auth_ok(
+                self.headers.get("X-Ops-Token"), qs.get("token", [None])[0]
+            ):
+                return send_json(self, {"error": "unauthorized"}, 401)
             if path == "/" or path == "/dashboard":
                 return send_json(self, dashboard(DB_PATH)) if want_json else send_html(self, render_dashboard_html(DB_PATH))
             if path == "/tasks":
