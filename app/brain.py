@@ -110,6 +110,9 @@ PERSONA = (
     "broadcast'. And you MUST CONFIRM FIRST: reply 'This posts to ALL store chats — send it?' "
     "and only call broadcast after they say yes. NEVER broadcast for a single-store or "
     "ambiguous request — default to post_to_room. If you're not 100% sure of the scope, ASK.\n"
+    "- You can act on tasks: close_task (one), clear_issues (close MANY at once — use for "
+    "'clear the issues for X', 'close all at <store>'; if it'll close a lot, confirm the "
+    "count first), assign_task. Just do it and confirm what you closed (the #ids). "
     "- You can act: close or assign tasks directly when asked — just do it and confirm "
     "naturally."
 )
@@ -350,11 +353,25 @@ _ACTION_TOOLS = [
     },
     {
         "name": "close_task",
-        "description": "Close/resolve an open task by its numeric id.",
+        "description": "Close/resolve ONE open task by its numeric id.",
         "input_schema": {
             "type": "object",
             "properties": {"task_id": {"type": "integer", "description": "The task number, e.g. 868"}},
             "required": ["task_id"],
+        },
+    },
+    {
+        "name": "clear_issues",
+        "description": "Close (clear) MULTIPLE open issues at once that match a keyword or "
+                       "store — use when the admin says 'clear the issues for X', 'close all "
+                       "the <thing> issues', 'clear everything at <store>'. Closes every open "
+                       "task matching the query. If it would close a lot, confirm the count "
+                       "with the admin first.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string",
+                           "description": "What to clear: a store, keyword, or topic, e.g. '2500', 'Channelview', 'pumps'"}},
+            "required": ["query"],
         },
     },
     {
@@ -642,6 +659,22 @@ def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> st
         if name == "close_task":
             r = reports.task_action(None, int(args["task_id"]), "close")
             return f"Closed task #{args['task_id']}." if r.get("ok") else f"Failed: {r.get('error')}"
+        if name == "clear_issues":
+            terms = str(args.get("query", "")).lower().split()
+            if not terms:
+                return "Tell me which issues to clear — a store, keyword, or topic."
+            hits = []
+            for t in reports.open_tasks(limit=500):
+                hay = (f"{t.get('room_name','')} {t.get('task_title','')} "
+                       f"{t.get('task_text','')} {t.get('category','')}").lower()
+                if all(term in hay for term in terms):
+                    hits.append(t)
+            if not hits:
+                return f"No open issues match '{args.get('query')}' — nothing to clear."
+            closed = [t for t in hits if reports.task_action(None, t["id"], "close").get("ok")]
+            ids = ", ".join(f"#{t['id']}" for t in closed[:25])
+            return (f"Cleared {len(closed)} issue(s) matching '{args.get('query')}': {ids}"
+                    + ("…" if len(closed) > 25 else "."))
         if name == "assign_task":
             r = reports.task_action(None, int(args["task_id"]), "assign", str(args.get("assignee", "")))
             return (f"Assigned task #{args['task_id']} to {args.get('assignee')}."
