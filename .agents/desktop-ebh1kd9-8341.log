@@ -5,3 +5,5 @@
 2026-06-17T15:48:02Z heartbeat (desktop-ebh1kd9-8341)
 2026-06-17T15:50:12Z ready for review: feat/bol-veeder-reconcile__desktop-ebh1kd9-8341 (app/reconcile.py cross-event BOL/Veeder mismatch detection, 14 tests, suite 110 green)
 2026-06-17T15:50:12Z heartbeat (desktop-ebh1kd9-8341)
+2026-06-17T15:52:36Z ready for review: feat/receipt-ocr__desktop-ebh1kd9-8341 (BOL/receipt per-product OCR in vision.py, backfills bol_gallons, 15 tests, suite 111 green)
+2026-06-17T15:52:36Z heartbeat (desktop-ebh1kd9-8341)
