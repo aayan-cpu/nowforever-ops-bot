@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from datetime import datetime, timezone
 
-from app import reports, chat_media, brain, store
+from app import reports, chat_media, brain, store, reconcile
 
 ESCALATE_HOURS = float(os.getenv("OPS_ESCALATE_HOURS", "36"))
 
@@ -166,6 +166,19 @@ def escalation() -> dict:
     return {"ok": sent > 0, "kind": "escalation", "stale": len(stale)}
 
 
+def reconcile_alert() -> dict:
+    """Proactively DM admins a high-priority alert when BOL vs Veeder-Root fuel
+    deliveries differ beyond the threshold (builds on app/reconcile.py). Quiet
+    when everything reconciles, so it's safe to run on a schedule."""
+    flagged = reconcile.discrepancies()
+    if not flagged:
+        return {"ok": True, "kind": "reconcile_alert", "flagged": 0}
+    msg = ("🛑 *Fuel reconciliation alert* — BOL vs Veeder-Root mismatch over threshold:\n"
+           + reconcile.summarize())
+    sent = sum(1 for tgt in _admin_dms() if chat_media.post_to_space(tgt["space"], msg))
+    return {"ok": sent > 0, "kind": "reconcile_alert", "flagged": len(flagged), "sent": sent}
+
+
 def weekly_report() -> dict:
     """Weekly — AI executive rollup, DM'd to each admin (tailored to their prefs)."""
     targets = _admin_dms()
@@ -238,6 +251,7 @@ JOBS = {
     "missing-reports": missing_reports,
     "report-reminder": report_reminder,
     "late-reports": late_reports,
+    "reconcile-alert": reconcile_alert,
     "ceo-summary": ceo_summary,
     "weekly-report": weekly_report,
     "weekly-digest": weekly_digest,
