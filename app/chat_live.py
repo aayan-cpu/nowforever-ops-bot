@@ -314,6 +314,10 @@ def ingest_live_event(event: dict, db_path: str = DB_PATH, analyze: bool = True)
     vis = analyze_images(msg) if (analyze and operational) else _no_vision()
     priority = "high" if vis["needs_review"] else c.priority
     is_task = c.is_task or vis["needs_review"]
+    # A DM to the bot is a command/conversation, NOT a store issue — never let it
+    # become an alert or a task (that's why the owner's own DMs showed as alerts).
+    if msg.get("is_dm"):
+        priority, is_task = "normal", False
     # If we skipped image AI (sync, analyze=False) but there ARE operational images,
     # remember the attachment refs so the throttled OCR pass can read them later.
     imgs = msg.get("image_attachments") or []

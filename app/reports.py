@@ -118,7 +118,8 @@ def open_tasks(db_path: str | None = None, room: str | None = None, limit: int =
 
 def high_priority(db_path: str | None = None, limit: int = 50) -> list[dict]:
     rows = [m for m in store.list_all("messages")
-            if m.get("priority") == "high" and not m.get("is_duplicate")]
+            if m.get("priority") == "high" and not m.get("is_duplicate")
+            and not m.get("is_dm")]  # DMs to the bot are commands, not store alerts
     return _sort_recent(rows)[:limit]
 
 
