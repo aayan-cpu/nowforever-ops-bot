@@ -20,11 +20,19 @@
 
 ## Backlog
 
-- [ ] (TODO) Verify Google Chat webhook bearer token in `/chat/events` (currently accepts all requests — security hole).  branch: —
-- [ ] (TODO) Add dashboard auth for `/dashboard`, `/tasks`, `/alerts` (token-based or IAP).  branch: —
-- [ ] (TODO) Weekly digest job (per-room summary).  branch: —
-- [ ] (TODO) Site-name normalization across rooms.  branch: —
-- [ ] (TODO) Missing/overdue report detection + reminders.  branch: —
+> Each task is independent. The file each mainly touches is noted so two workers
+> don't fight over the same file — prefer claiming tasks that touch different files.
+
+- [ ] (TODO) **Webhook bearer-token verification** for `/chat/events` (security hole: accepts any request). NOTE FROM MANAGER: Google Chat sends `Authorization: Bearer <JWT>` signed by `chat@system.gserviceaccount.com`, audience = the project number. `cryptography` is NOT installed (breaks on Py 3.14) — do RS256 verification the stdlib way, mirroring the JWT *signing* pattern already in `app/chat_media.py:_sa_key_token`. Verify sig (Google x509 certs, cached), `iss`, `aud` (new env `OPS_CHAT_AUDIENCE`), `exp`. Gate behind env `OPS_VERIFY_CHAT_TOKEN=1` so it can't dark the live bot before the audience is configured. New module `app/chat_auth.py`; wire into `app/server.py` do_POST `/chat/events`. mainly: app/chat_auth.py (new), app/server.py  branch: —
+- [ ] (TODO) **Dashboard auth** for `/dashboard`, `/tasks`, `/alerts` — token-based (e.g. `?token=` / `X-Ops-Token` vs new `OPS_DASHBOARD_TOKEN`), gated so it stays open when the env var is unset. mainly: app/server.py  branch: —
+- [ ] (TODO) **Weekly digest job** (per-room summary) — add a `JOBS` entry in `app/digests.py` (follow the existing daily-summary job), wired to `/cron/<name>`. mainly: app/digests.py  branch: —
+- [ ] (TODO) **Site-name normalization** — one canonical resolver (e.g. "11", "Windchase", "11 N&F Windchase" → same site). mainly: new app/sites.py + callers  branch: —
+- [ ] (TODO) **Missing/overdue report detection + reminders** — flag sites that haven't reported, DM/post a reminder. mainly: app/digests.py + app/reports.py  branch: —
+- [ ] (TODO) **Test suite + smoke tests** — no `tests/` exists yet. Add pytest-free stdlib `unittest` tests for classifier, reports, server routes, and the new chat_auth. Highest-leverage for letting workers self-verify. mainly: tests/ (new)  branch: —
+- [ ] (TODO) **OCR for BOL / fuel-delivery receipts** (Phase 5) — `app/vision.py` exists; extract gallons/product from receipt images. mainly: app/vision.py  branch: —
+- [ ] (TODO) **Veeder-Root vs BOL mismatch detection** (Phase 5) — compare delivered (BOL) vs tank gauge, flag discrepancies like the ~2,500 gal Channelview case. mainly: new app/reconcile.py  branch: —
+- [ ] (TODO) **Scoped roles** (docs/ROLES.md "Planned") — `roles` map (email→role) with permission + store scope below admin. mainly: new app/roles.py + brain/command handlers  branch: —
+- [ ] (TODO) **Audit remaining docs for stale module refs** — README is fixed; sweep `docs/*.md` for references to nonexistent modules / outdated SQLite-as-live claims. mainly: docs/  branch: —
 
 ## In progress
 
