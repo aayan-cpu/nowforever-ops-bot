@@ -245,7 +245,16 @@ def weekly_digest() -> dict:
     return {"ok": ok, "kind": "weekly_digest", "rooms": rooms, "open_tasks": len(tasks)}
 
 
+def sync_messages() -> dict:
+    """Pull messages the webhook never delivered (Google Chat only forwards
+    @mentions) from every room and ingest them, so every store is fully tracked."""
+    from app import sync
+    res = sync.sync_once()
+    return {"ok": res.get("ingested", 0) >= 0, "kind": "sync_messages", **res}
+
+
 JOBS = {
+    "sync": sync_messages,
     "morning-digest": morning_digest,
     "urgent-reminder": urgent_reminder,
     "missing-reports": missing_reports,

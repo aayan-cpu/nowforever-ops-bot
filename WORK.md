@@ -42,6 +42,7 @@
 
 ## Done
 
+- [x] (DONE) **Message sync — read ALL messages** — app/sync.py pulls recent messages from every room via Chat API (read scope) and ingests them, fixing the core gap that Google Chat only forwards @mentions. Stores like Harwin/Synott/Bissonnet/Fry/Coastal that were blind are now tracked. Cron job 'sync'. [pc-mgr]
 - [x] (DONE) **Bot DMs/messages dashboard** — /dms (DMs grouped by person) + /messages (searchable), behind OPS_DASHBOARD_TOKEN; is_dm captured on ingest. [pc-mgr]
 - [x] (DONE) **Broadcast reliability** — broadcast now targets rooms via Chat API spaces.list (reaches quiet rooms the bot is in, not just ones with recent messages), filters DM/test junk, lists which stores it reached; post_to_space gained retry/backoff for transient/429 failures. Fixes 'didn't reach Synott'. [pc-mgr]
 - [x] (DONE) **Org understanding** — app/org.py: classifies each room (store/all-captains/marketing), maps room→store (via sites.py), builds a people roster (who's active where = home store), flags admins/managers; get_org brain tool + prompt so the bot answers who-works-where / who's-the-manager / what-rooms questions. [pc-mgr]
