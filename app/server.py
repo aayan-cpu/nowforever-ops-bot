@@ -8,7 +8,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from app.reports import (
     dashboard, high_priority, open_tasks, room_summary, task_action,
-    render_dashboard_html, render_tasks_html, render_alerts_html, render_room_html
+    render_dashboard_html, render_tasks_html, render_alerts_html, render_room_html,
+    render_messages_html, render_dms_html,
 )
 from app.chat_live import handle_google_chat_event, ingest_live_event, google_chat_response
 from app import digests, chat_auth
@@ -71,7 +72,7 @@ class OpsHandler(BaseHTTPRequestHandler):
             # Health, Google Chat, and cron endpoints are intentionally excluded
             # (the latter two carry their own auth / must stay open for the bot).
             dashboard_view = (
-                path in {"/", "/dashboard", "/tasks", "/alerts", "/api/dashboard"}
+                path in {"/", "/dashboard", "/tasks", "/alerts", "/api/dashboard", "/messages", "/dms"}
                 or path.startswith("/rooms/")
             )
             if dashboard_view and not dashboard_auth_ok(
@@ -87,6 +88,11 @@ class OpsHandler(BaseHTTPRequestHandler):
             if path == "/alerts":
                 limit = int(qs.get("limit", [100])[0])
                 return send_json(self, high_priority(DB_PATH, limit)) if want_json else send_html(self, render_alerts_html(DB_PATH))
+            if path == "/messages":
+                return send_html(self, render_messages_html(
+                    DB_PATH, qs.get("room", [None])[0], qs.get("q", [None])[0]))
+            if path == "/dms":
+                return send_html(self, render_dms_html(DB_PATH))
             if path.startswith("/rooms/"):
                 room_name = unquote(path.split("/rooms/", 1)[1])
                 return send_json(self, room_summary(DB_PATH, room_name)) if want_json else send_html(self, render_room_html(DB_PATH, room_name))

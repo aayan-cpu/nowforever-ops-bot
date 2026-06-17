@@ -492,6 +492,54 @@ def render_room_html(db_path: str, room: str) -> str:
     return "".join(parts)
 
 
+def render_messages_html(db_path=None, room=None, q=None, dms_only=False, limit=400) -> str:
+    msgs = store.list_all("messages")
+    if dms_only:
+        msgs = [m for m in msgs if m.get("is_dm")]
+    if room:
+        msgs = [m for m in msgs if room.lower() in (m.get("room_name") or "").lower()]
+    if q:
+        ql = q.lower()
+        msgs = [m for m in msgs if ql in (m.get("message") or "").lower()
+                or ql in (m.get("sender") or "").lower()]
+    msgs = _sort_recent(msgs)[:limit]
+    title = "Bot DMs" if dms_only else "All Messages"
+    parts = [HTML_HEAD, f"<body><main><h1>{html.escape(title)} <span>({len(msgs)})</span></h1>",
+             "<p><a href='/dashboard'>← Dashboard</a> · <a href='/messages'>All</a> · <a href='/dms'>DMs</a></p>",
+             "<form method='get'><input name='q' placeholder='search text or sender' value=\""
+             + html.escape(q or "") + "\"><button>Search</button></form>"]
+    for m in msgs:
+        dm = " 🔒DM" if m.get("is_dm") else ""
+        ts = html.escape((m.get("sent_at") or m.get("timestamp_raw") or "")[:19])
+        parts.append(
+            f"<article class='item'><div><b>{html.escape(m.get('sender') or '?')}</b> "
+            f"<small>{html.escape(m.get('room_name') or '')}{dm} · {ts}</small></div>"
+            f"<p>{html.escape((m.get('message') or '')[:1500])}</p></article>")
+    parts.append("</main></body></html>")
+    return "".join(parts)
+
+
+def render_dms_html(db_path=None) -> str:
+    msgs = [m for m in store.list_all("messages") if m.get("is_dm")]
+    by_person: dict = {}
+    for m in _sort_recent(msgs):
+        by_person.setdefault(m.get("sender") or "?", []).append(m)
+    parts = [HTML_HEAD, f"<body><main><h1>Bot DMs <span>({len(by_person)} people · {len(msgs)} msgs)</span></h1>",
+             "<p><a href='/dashboard'>← Dashboard</a> · <a href='/messages'>All messages</a></p>",
+             "<p><small>What people have sent the bot in DMs. (The bot's own replies aren't stored "
+             "here — Google Vault has the full two-sided thread.)</small></p>"]
+    for person, ms in sorted(by_person.items(),
+                             key=lambda kv: kv[1][0].get("sent_at") or "", reverse=True):
+        parts.append(f"<section><h2>{html.escape(person)} <small>({len(ms)})</small></h2>")
+        for m in ms[:50]:
+            ts = html.escape((m.get("sent_at") or m.get("timestamp_raw") or "")[:19])
+            parts.append(f"<article class='item'><small>{ts}</small>"
+                         f"<p>{html.escape((m.get('message') or '')[:1000])}</p></article>")
+        parts.append("</section>")
+    parts.append("</main></body></html>")
+    return "".join(parts)
+
+
 HTML_HEAD = """
 <!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>
 <title>Now & Forever Ops</title>

@@ -42,6 +42,8 @@
 
 ## Done
 
+- [x] (DONE) **Bot DMs/messages dashboard** — /dms (DMs grouped by person) + /messages (searchable), behind OPS_DASHBOARD_TOKEN; is_dm captured on ingest. [pc-mgr]
+- [x] (DONE) **Broadcast reliability** — broadcast now targets rooms via Chat API spaces.list (reaches quiet rooms the bot is in, not just ones with recent messages), filters DM/test junk, lists which stores it reached; post_to_space gained retry/backoff for transient/429 failures. Fixes 'didn't reach Synott'. [pc-mgr]
 - [x] (DONE) **Org understanding** — app/org.py: classifies each room (store/all-captains/marketing), maps room→store (via sites.py), builds a people roster (who's active where = home store), flags admins/managers; get_org brain tool + prompt so the bot answers who-works-where / who's-the-manager / what-rooms questions. [pc-mgr]
 - [x] (DONE) **Broadcast to ALL store chats** — broadcast tool now posts an announcement into every store room the bot is in (scope=all_stores, default), not just all-captains; reports reached/failed. [pc-mgr]
 - [x] (DONE) **Cold-DM creation** — bot can now START a DM with any org Workspace user via spaces.setup (no need for them to message first); dm_email uses ensure_dm_space (find-or-create). Needs live verification of Chat app DM perms; falls back gracefully. [pc-mgr]

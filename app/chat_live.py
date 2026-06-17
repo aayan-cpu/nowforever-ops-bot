@@ -160,10 +160,15 @@ def extract_chat_event(event: dict) -> dict:
     )
     data_id = message_obj.get("name") or event.get("data_id") or f"live-{datetime.now(timezone.utc).timestamp()}"
 
+    is_dm = (space_obj.get("type") == "DM"
+             or space_obj.get("spaceType") == "DIRECT_MESSAGE"
+             or bool(space_obj.get("singleUserBotDm")))
+
     return {
         "event_type": event_type,
         "room_id": str(room_id),
         "room_name": str(room_name),
+        "is_dm": is_dm,
         "sender": normalize_sender(str(sender)),
         "timestamp_raw": str(timestamp),
         # Normalized ISO-8601 UTC send-time (when the message was posted), so the
@@ -311,6 +316,7 @@ def ingest_live_event(event: dict, db_path: str = DB_PATH) -> dict:
     message_doc = store.create("messages", {
         "seq": store.next_seq("messages"),
         "room_id": msg["room_id"], "room_name": msg["room_name"], "data_id": msg["data_id"],
+        "is_dm": bool(msg.get("is_dm")),
         "sender": msg["sender"], "timestamp_raw": msg["timestamp_raw"],
         "sent_at": msg["sent_at"], "message": msg["message"],
         "attachments": msg["attachments"], "attachment_count": msg["attachment_count"],

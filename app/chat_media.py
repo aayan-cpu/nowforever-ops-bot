@@ -202,21 +202,62 @@ def latest_image(space_id: str):
     return None
 
 
-def post_to_space(space: str, text: str) -> bool:
-    """Proactively post a message to a Chat space (for digests/alerts)."""
+def post_to_space(space: str, text: str, retries: int = 2) -> bool:
+    """Proactively post a message to a Chat space (digests/alerts/broadcast).
+    Retries transient failures (timeouts, 5xx, 429 rate limits) so a single hiccup
+    during a multi-room broadcast doesn't silently drop that store."""
     tok = get_chat_token()
     if not tok or not space or not text:
         return False
     url = f"https://chat.googleapis.com/v1/{space}/messages"
     body = json.dumps({"text": text[:3900]}).encode()
-    req = urllib.request.Request(url, data=body, headers={
-        "Authorization": f"Bearer {tok}", "Content-Type": "application/json"})
+    for attempt in range(retries + 1):
+        req = urllib.request.Request(url, data=body, headers={
+            "Authorization": f"Bearer {tok}", "Content-Type": "application/json"})
+        try:
+            urllib.request.urlopen(req, context=_ctx, timeout=20).read()
+            return True
+        except urllib.error.HTTPError as e:
+            transient = e.code in (429, 500, 502, 503, 504)
+            print(f"[post] {space} HTTP {e.code}"
+                  f"{' (retrying)' if transient and attempt < retries else ''}", flush=True)
+            if not (transient and attempt < retries):
+                return False
+        except Exception as e:
+            print(f"[post] {space} error: {e}"
+                  f"{' (retrying)' if attempt < retries else ''}", flush=True)
+            if attempt >= retries:
+                return False
+        time.sleep(0.6 * (attempt + 1))
+    return False
+
+
+def list_bot_spaces() -> list:
+    """All Chat ROOMS the bot is a member of (excludes DMs), via spaces.list — the
+    authoritative source; includes rooms even if they've been quiet (unlike deriving
+    targets from message history). Returns [(space_name, display_name)]; [] on failure."""
+    tok = get_chat_token()
+    if not tok:
+        return []
+    out, page = [], ""
     try:
-        urllib.request.urlopen(req, context=_ctx, timeout=20).read()
-        return True
+        while True:
+            url = ('https://chat.googleapis.com/v1/spaces?pageSize=100'
+                   '&filter=space_type%20%3D%20%22SPACE%22')
+            if page:
+                url += "&pageToken=" + page
+            req = urllib.request.Request(url, headers={"Authorization": f"Bearer {tok}"})
+            data = json.loads(urllib.request.urlopen(req, context=_ctx, timeout=20).read())
+            for s in data.get("spaces", []):
+                if s.get("name"):
+                    out.append((s["name"], s.get("displayName") or s["name"]))
+            page = data.get("nextPageToken", "")
+            if not page:
+                break
     except Exception as e:
-        print(f"[post] {space} error: {e}", flush=True)
-        return False
+        print(f"[chat] list_bot_spaces: {e}", flush=True)
+        return []
+    return out
 
 
 def image_attachments(message_obj: dict) -> list[dict]:

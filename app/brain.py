@@ -401,11 +401,25 @@ def _rooms_from_messages(messages, dm_spaces) -> list:
 
 
 def store_room_spaces() -> list:
-    """Live: the store chats the bot can post to — derived from ingested messages
-    (rooms it's a member of), minus the bot's own DM spaces."""
+    """Live: the rooms the bot has ingested from (members of), minus DM spaces.
+    Includes all-captains / marketing too (used by org). Excludes is_dm messages."""
     dm = {os.getenv("OPS_ADMIN_DM_SPACE", "")}
     dm |= {d.get("space") for d in store.list_all("admin_dms") if d.get("space")}
-    return _rooms_from_messages(store.list_all("messages"), dm)
+    msgs = [m for m in store.list_all("messages") if not m.get("is_dm")]
+    return _rooms_from_messages(msgs, dm)
+
+
+def store_chat_spaces() -> list:
+    """Rooms a broadcast posts to. PREFERS the Chat API spaces.list — every room the
+    bot is a member of, *including ones that have been quiet* (so we don't miss a
+    store just because it hasn't posted lately). Falls back to message-derived
+    station rooms only if the API is unavailable (which also excludes DM/test junk)."""
+    from app import chat_media
+    live = chat_media.list_bot_spaces()
+    if live:
+        return live
+    from app import sites
+    return [(sp, rn) for sp, rn in store_room_spaces() if sites.is_station(rn)]
 
 
 def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> str:
@@ -600,15 +614,18 @@ def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> st
                 space = os.getenv("OPS_ALL_CAPTAINS_SPACE", "spaces/AAAAhO6H0_Y")
                 return ("Announcement posted to all-captains."
                         if chat_media.post_to_space(space, body) else "Couldn't post the announcement.")
-            rooms = store_room_spaces()
+            rooms = store_chat_spaces()
             if not rooms:
                 return "I don't have any store rooms on record to post to yet."
             sent, failed = [], []
             for sp, rn in rooms:
                 (sent if chat_media.post_to_space(sp, body) else failed).append(rn)
-            res = f"📢 Sent to {len(sent)} store chat(s)."
+            res = f"📢 Sent to {len(sent)} store chats: {', '.join(sorted(sent))}."
             if failed:
-                res += f" Couldn't reach {len(failed)}: {', '.join(failed[:8])}{'…' if len(failed) > 8 else ''}."
+                res += (f" Couldn't reach {len(failed)} (bot may have been removed from these "
+                        f"rooms): {', '.join(sorted(failed))}.")
+            res += (" Any store NOT listed here isn't a room I've been added to — add me to its "
+                    "chat and I'll reach it next time.")
             return res
     except Exception as e:
         return f"Tool error: {e}"
