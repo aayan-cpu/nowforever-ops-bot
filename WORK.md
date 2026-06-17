@@ -25,7 +25,6 @@
 
 - [ ] (ASSIGNED:desktop-ebh1kd9-8686) **Message timestamps in ingestion** — bot can't see message send-times, so it can't tell when shift/day reports were posted or flag late/missing-by-cutoff. Carry the Chat message timestamp through ingest → store → snapshot. mainly: app/ingest.py, app/chat_live.py, app/store.py  branch: —
 - [ ] (DONE-PARTIAL) Response-quality root cause FIXED (grounding on complete aggregates, commit 0f4255f). Remaining quality items split into the 4 tasks above. NEEDS DEPLOY to take effect.
-- [ ] (ASSIGNED:desktop-ebh1kd9-3575) **Webhook bearer-token verification** for `/chat/events` (security hole: accepts any request). NOTE FROM MANAGER: Google Chat sends `Authorization: Bearer <JWT>` signed by `chat@system.gserviceaccount.com`, audience = the project number. `cryptography` is NOT installed (breaks on Py 3.14) — do RS256 verification the stdlib way, mirroring the JWT *signing* pattern already in `app/chat_media.py:_sa_key_token`. Verify sig (Google x509 certs, cached), `iss`, `aud` (new env `OPS_CHAT_AUDIENCE`), `exp`. Gate behind env `OPS_VERIFY_CHAT_TOKEN=1` so it can't dark the live bot before the audience is configured. New module `app/chat_auth.py`; wire into `app/server.py` do_POST `/chat/events`. mainly: app/chat_auth.py (new), app/server.py  branch: —
 
 
 - [ ] (ASSIGNED:desktop-ebh1kd9-8341) **Dashboard surfaces reconcile + scorecard** — render fuel-reconcile mismatches and per-store scorecard in the HTML views. mainly: app/reports.py  branch: —
@@ -44,6 +43,7 @@
 
 ## Done
 
+- [x] (DONE) **Webhook bearer-token verification** — pure-stdlib RS256 JWT verify (strict PKCS#1 v1.5, iss/aud/exp, cert cache), gated by OPS_VERIFY_CHAT_TOKEN. Security blocker closed. [worker 3575, merged by pc-mgr]
 - [x] (DONE) **Report cutoff + late flagging** — per-store expected report times, flag late [worker 3575, merged by pc-mgr]
 - [x] (DONE) **Near-duplicate task dedupe** — collapse repeated messages into one task [worker 3575, merged by pc-mgr]
 - [x] (DONE) **Brain API resilience** — retry/backoff+timeout for Claude REST call [worker 3575, merged by pc-mgr]
