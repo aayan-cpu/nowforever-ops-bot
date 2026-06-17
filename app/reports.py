@@ -14,6 +14,30 @@ def _sort_recent(rows: list[dict]) -> list[dict]:
     return sorted(rows, key=lambda r: (r.get("seq") or 0, r.get("created_at") or r.get("timestamp_raw") or ""), reverse=True)
 
 
+try:
+    from zoneinfo import ZoneInfo
+    _LOCAL_TZ = ZoneInfo(os.getenv("OPS_TIMEZONE", "America/Chicago"))
+except Exception:
+    _LOCAL_TZ = None
+
+
+def fmt_ts(ts: str) -> str:
+    """Format a stored UTC timestamp in the local timezone (default US Central),
+    e.g. 'Jun 17, 2:03 PM'. Falls back to the raw string if it can't parse."""
+    if not ts:
+        return ""
+    try:
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        if _LOCAL_TZ:
+            dt = dt.astimezone(_LOCAL_TZ)
+        hh = dt.hour % 12 or 12
+        return f"{dt.strftime('%b')} {dt.day}, {hh}:{dt.minute:02d} {'AM' if dt.hour < 12 else 'PM'}"
+    except Exception:
+        return str(ts)[:19]
+
+
 _PRI_RANK = {"high": 0, "medium": 1}
 
 
@@ -434,7 +458,7 @@ def render_dashboard_html(db_path: str = "data/ops_bot.sqlite3") -> str:
 
     html_parts.append("<section><h2>High Priority Alerts</h2>")
     for a in alerts:
-        html_parts.append(f"<article class='item highline'><b>{html.escape(a['room_name'])}</b> {_badge('high')} <small>{html.escape(a.get('timestamp_raw') or '')}</small><p>{html.escape(a.get('message') or '')}</p><small>Sender: {html.escape(a.get('sender') or '')} · Assigned hint: {html.escape(a.get('assigned_hint') or '')}</small></article>")
+        html_parts.append(f"<article class='item highline'><b>{html.escape(a['room_name'])}</b> {_badge('high')} <small>{html.escape(fmt_ts(a.get('timestamp_raw')))}</small><p>{html.escape(a.get('message') or '')}</p><small>Sender: {html.escape(a.get('sender') or '')} · Assigned hint: {html.escape(a.get('assigned_hint') or '')}</small></article>")
     html_parts.append("</section>")
     html_parts.append("<section><h2>Open Tasks</h2>")
     for t in tasks:
@@ -471,7 +495,7 @@ def render_alerts_html(db_path: str = "data/ops_bot.sqlite3") -> str:
     alerts = high_priority(db_path, 100)
     parts = [HTML_HEAD, "<body><main><h1>High Priority Alerts</h1><p><a href='/dashboard'>← Dashboard</a></p>"]
     for a in alerts:
-        parts.append(f"<article class='item highline'><b>{html.escape(a['room_name'])}</b> {_badge('high')} <small>{html.escape(a.get('timestamp_raw') or '')}</small><p>{html.escape(a.get('message') or '')}</p><small>Sender: {html.escape(a.get('sender') or '')} · Categories: {html.escape(a.get('categories') or '')}</small></article>")
+        parts.append(f"<article class='item highline'><b>{html.escape(a['room_name'])}</b> {_badge('high')} <small>{html.escape(fmt_ts(a.get('timestamp_raw')))}</small><p>{html.escape(a.get('message') or '')}</p><small>Sender: {html.escape(a.get('sender') or '')} · Categories: {html.escape(a.get('categories') or '')}</small></article>")
     parts.append("</main></body></html>")
     return "".join(parts)
 
@@ -487,7 +511,7 @@ def render_room_html(db_path: str, room: str) -> str:
         parts.append(task_card(t))
     parts.append("<h2>Recent messages</h2>")
     for m in data['recent']:
-        parts.append(f"<article class='item'><b>{html.escape(m.get('sender') or '')}</b> {_badge(m.get('priority') or 'normal')} <small>{html.escape(m.get('timestamp_raw') or '')}</small><p>{html.escape(m.get('message') or '')}</p><small>{html.escape(m.get('categories') or '')}</small></article>")
+        parts.append(f"<article class='item'><b>{html.escape(m.get('sender') or '')}</b> {_badge(m.get('priority') or 'normal')} <small>{html.escape(fmt_ts(m.get('timestamp_raw')))}</small><p>{html.escape(m.get('message') or '')}</p><small>{html.escape(m.get('categories') or '')}</small></article>")
     parts.append("</main></body></html>")
     return "".join(parts)
 
@@ -549,7 +573,7 @@ def render_dms_html(db_path=None) -> str:
         ms_sorted = sorted(ms, key=lambda x: (x.get("sent_at") or "", x.get("seq") or 0))
         parts.append(f"<section><h2>{html.escape(person)} <small>({len(ms)})</small></h2>")
         for m in ms_sorted[-60:]:
-            ts = html.escape((m.get("sent_at") or m.get("timestamp_raw") or "")[:19])
+            ts = html.escape(fmt_ts(m.get("sent_at") or m.get("timestamp_raw")))
             bot = _is_bot_msg(m)
             who = "🤖 Bot" if bot else f"🧑 {html.escape(person)}"
             style = " style='background:#eef5ff'" if bot else ""
