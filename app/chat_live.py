@@ -25,6 +25,34 @@ ADMIN_EMAILS = {e.strip().lower() for e in os.getenv(
 ).split(",") if e.strip()}
 ADMIN_EMAILS.add(OWNER_EMAIL)  # owner is always an admin
 
+# Day-report items that should NEVER appear: a non-zero CASH VENDOR (a vendor paid
+# out of the cash drawer) or COMPANY GAS (fuel taken for own/company use). When the
+# OCR sees either, DM this admin. Defaults to admin2.
+VENDOR_ALERT_EMAIL = os.getenv("OPS_VENDOR_ALERT_EMAIL", "admin2@nowandforever.com").lower().strip()
+
+
+def _amt(v):
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    try:
+        return float(str(v).replace(",", "").replace("$", "").strip())
+    except (ValueError, AttributeError):
+        return None
+
+
+def disallowed_report_flags(res: dict) -> list[str]:
+    """Human-readable flags for day-report items that aren't allowed — a non-zero
+    CASH VENDOR or COMPANY GAS. Empty list if the report is clean. Pure + testable."""
+    flags = []
+    cv, cg = _amt(res.get("cash_vendor")), _amt(res.get("company_gas"))
+    if cv:
+        flags.append(f"CASH VENDOR ${cv:,.2f}")
+    if cg:
+        flags.append(f"COMPANY GAS ${cg:,.2f}")
+    return flags
+
 # Quiet mode: while testing, the bot ingests/classifies every space message
 # (tasks, dashboard, alerts keep working) but posts NOTHING visible in rooms.
 # It still replies in DMs so the admin can verify functionality. Flip this on
@@ -208,6 +236,20 @@ def analyze_images(msg: dict) -> dict:
                     })
                 except Exception as e:
                     print(f"[vision] day_report store: {e}", flush=True)
+                # CASH VENDOR / COMPANY GAS aren't allowed on a day report — alert admin2.
+                flags = disallowed_report_flags(res)
+                if flags:
+                    rd = f" ({res.get('report_date')})" if res.get("report_date") else ""
+                    alert = (f"🚩 Day report flag — {msg.get('room_name')}{rd}: "
+                             f"{' + '.join(flags)}. Not allowed; please review.")
+                    lines.append(alert)
+                    out["needs_review"] = True
+                    out["reason"] = ((out.get("reason") + " / ") if out.get("reason") else "") + " + ".join(flags)
+                    try:
+                        from app import directory
+                        directory.dm_email(VENDOR_ALERT_EMAIL, alert)
+                    except Exception as e:
+                        print(f"[vendor-alert] dm failed: {e}", flush=True)
             # Log BOL/Veeder readings for fuel reconciliation / shrinkage tracking.
             if res.get("bol_gallons") is not None or res.get("veeder_gallons") is not None:
                 try:

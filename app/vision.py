@@ -53,6 +53,8 @@ _SCHEMA = {
         "fuel_gallons_sold": {"type": ["number", "null"], "description": "Total fuel GALLONS sold/dispensed on a day report, else null."},
         "fuel_sales": {"type": ["number", "null"], "description": "Fuel sales $ on a day report, else null."},
         "cash_amount": {"type": ["number", "null"], "description": "CASH collected / to be deposited on a day report (the cash drawer / cash-to-bank figure, NOT total sales or card), else null. Used to reconcile against the bank deposit."},
+        "cash_vendor": {"type": ["number", "null"], "description": "CASH VENDOR total on a day report (vendors paid out of the drawer in cash). Read the 'CASH VENDOR' / vendor-total figure. Should normally be 0/blank — report the number if present, else null."},
+        "company_gas": {"type": ["number", "null"], "description": "COMPANY GAS total on a day report (fuel taken for company/own use). Read the 'Company Gas' total. Should normally be 0/blank — report the number if present, else null."},
         "amounts": {"type": "array", "items": {"type": "string"}, "description": "Dollar amounts seen."},
         "gallons": {"type": "array", "items": {"type": "string"}, "description": "Any gallon figures seen."},
         "prices": {"type": "array", "items": {"type": "string"}, "description": "Per-gallon prices seen."},
@@ -93,7 +95,7 @@ _SCHEMA = {
     },
     "required": ["doc_type", "summary", "bol_gallons", "veeder_gallons",
                  "report_date", "shift", "total_sales", "inside_sales",
-                 "fuel_gallons_sold", "fuel_sales", "cash_amount",
+                 "fuel_gallons_sold", "fuel_sales", "cash_amount", "cash_vendor", "company_gas",
                  "amounts", "gallons", "prices", "products", "tanks", "site_hint", "model_flagged_issue"],
     "additionalProperties": False,
 }
@@ -113,6 +115,9 @@ _PROMPT = (
     "total_sales, inside_sales (store/merchandise sales $), fuel_sales ($), "
     "fuel_gallons_sold (total gallons dispensed), and cash_amount (the CASH "
     "collected / cash-to-deposit figure — the drawer/bank cash, not card or total). "
+    "ALSO read cash_vendor (the 'CASH VENDOR' total — vendors paid in cash) and "
+    "company_gas (the 'Company Gas' total) — these are normally 0/blank; report the "
+    "number if either shows a value. "
     "Capture key dollar amounts; set "
     "model_flagged_issue=true if required fields are blank/missing or totals don't add up.\n"
     "Always capture any dollar amounts, gallon figures, and per-gallon prices you see, "
