@@ -542,6 +542,11 @@ def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> st
     if low in ALERT_WORDS:
         if not admin and brain.enabled():
             return None
+        # Consolidate same-issue chatter into one alert per real problem; fall
+        # back to the raw per-message list only if the brain is unavailable.
+        consolidated = brain.consolidate_alerts(db_path)
+        if consolidated:
+            return consolidated
         alerts = high_priority(db_path, 8)
         if not alerts:
             return "No high-priority alerts found."

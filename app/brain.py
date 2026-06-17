@@ -103,6 +103,12 @@ PERSONA = (
     "answering. For store questions you MUST call lookup_site (the OPS DATA sample is "
     "incomplete per store — never answer from it alone or say 'the rest isn't broken out'). "
     "No links needed — just the timestamp.\n"
+    "- CONSOLIDATE — when you list issues/alerts, group every message about the SAME problem "
+    "at the SAME store into ONE issue. Captains send a flurry about one thing ('pumps not "
+    "working', 'I reset it', 'still not working', 'do you see the power outside?') — that is "
+    "ONE issue, not five. Drop pure chatter/acknowledgements. Use the first mention for the "
+    "'first reported' time and the latest message for current status. Never list the same "
+    "problem as multiple separate alerts.\n"
     "- SENDING MESSAGES — be careful, these go to real people:\n"
     "  • ONE store's chat → use post_to_room (goes ONLY to that store). Do it directly.\n"
     "  • ONE person → use message_user. Do it directly.\n"
@@ -739,6 +745,51 @@ def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> st
     except Exception as e:
         return f"Tool error: {e}"
     return f"Unknown tool {name}"
+
+
+def consolidate_alerts(db_path: str | None = None, limit: int = 60) -> str | None:
+    """Cluster raw high-priority messages into distinct issues per store, using
+    the model's judgment so one problem ("pumps down → I reset → still broken")
+    shows up as ONE alert, not five, and pure chatter is dropped. Returns the
+    formatted alert text, or None if the brain is unavailable so the caller can
+    fall back to the raw per-message list."""
+    if not enabled():
+        return None
+    rows = reports.high_priority(db_path, limit)
+    if not rows:
+        return "No high-priority alerts found."
+    # Oldest first so the model sees how each issue evolved over the thread.
+    feed_lines = []
+    for m in reversed(rows):
+        ts = reports.fmt_ts(m.get("sent_at") or m.get("created_at") or m.get("timestamp_raw"))
+        who = m.get("sender") or "?"
+        feed_lines.append(f"[{ts}] [{m.get('room_name') or '?'}] {who}: "
+                          f"{(m.get('message') or '')[:200]}")
+    instructions = (
+        "Consolidate these raw high-priority gas-station chat messages into a CLEAN "
+        "alert list for the owner.\n"
+        "RULES:\n"
+        "- GROUP every message about the SAME problem at the SAME store into ONE issue. "
+        "Captains send a flurry of messages about one problem (\"pumps not working\", "
+        "\"I reset it\", \"still not working\", \"do you see the power outside?\") — that is "
+        "ONE issue, not several.\n"
+        "- DROP pure chatter, acknowledgements, and questions that aren't themselves a problem.\n"
+        "- Across the messages for an issue: use the FIRST mention for the time, the LATEST "
+        "for current status.\n"
+        "- One line per distinct issue, exactly: \"• [Store] <short issue> — first reported "
+        "<time>; latest: <newest status>\".\n"
+        "- Keep the store tag exactly as given. Do NOT invent issues that aren't in the messages.\n"
+        "- Group by store, most urgent first.\n\n"
+        f"MESSAGES (oldest first):\n" + "\n".join(feed_lines) + "\n\n"
+        "Output ONLY the consolidated bullet list — no preamble, no closing remark."
+    )
+    try:
+        resp = _call_claude([{"role": "user", "content": instructions}], None)
+        text = "".join(b.get("text", "") for b in resp.get("content", [])
+                        if b.get("type") == "text").strip()
+    except Exception:
+        return None
+    return ("🚨 High Priority Alerts\n" + text) if text else None
 
 
 def _post_once(payload: bytes) -> dict:
