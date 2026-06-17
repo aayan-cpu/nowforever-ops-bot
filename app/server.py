@@ -59,10 +59,13 @@ class OpsHandler(BaseHTTPRequestHandler):
         qs = parse_qs(parsed.query)
         want_json = qs.get("format", [""])[0] == "json" or path.startswith("/api/")
         try:
-            # Cheap liveness probe — point the Cloud Run uptime check here.
+            # Cheap liveness probe — point the Cloud Run uptime check at /status.
             # Returns immediately without touching Firestore so a busy worker
             # thread or slow datastore can never make the service look "down".
-            if path in {"/healthz", "/_ah/health"}:
+            # NOTE: Cloud Run's frontend intercepts /healthz and /_ah/* before they
+            # reach the container, so /status is the path that actually works on the
+            # public run.app URL. /healthz/_ah kept for non-Cloud-Run / local use.
+            if path in {"/status", "/healthz", "/_ah/health"}:
                 return send_json(self, {"ok": True})
             # Gate the operational dashboard/data views behind OPS_DASHBOARD_TOKEN.
             # Health, Google Chat, and cron endpoints are intentionally excluded
