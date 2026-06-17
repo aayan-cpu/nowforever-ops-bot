@@ -31,6 +31,9 @@
 - [ ] (ASSIGNED:desktop-ebh1kd9-8341) **Dashboard surfaces reconcile + scorecard** — render fuel-reconcile mismatches and per-store scorecard in the HTML views. mainly: app/reports.py  branch: —
 - [ ] (TODO) **Veeder-Root reading OCR** — parse tank-gauge reading photos (complements BOL OCR). mainly: app/vision.py  branch: —
 
+- [ ] (TODO) **Proactive reconciliation alerts** — when BOL-vs-Veeder mismatch exceeds a threshold, raise a high-priority alert/DM (builds on app/reconcile.py). mainly: app/reconcile.py  branch: —
+- [ ] (TODO) **Multi-turn conversation memory** — let the brain remember the last few turns per user so follow-ups ("and the other one?") resolve. mainly: app/brain.py  branch: —
+
 ## In progress
 
 <!-- claimed rows move here -->
