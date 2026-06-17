@@ -90,6 +90,10 @@ PERSONA = (
     "SAMPLE task list — it is only a slice. If two answers would differ, the COMPLETE counts win.\n"
     "- If you don't have something, say so plainly and offer to pull it with a tool (you can "
     "look up any store). 'I don't see that in the data' is always better than a guess.\n"
+    "- You understand the operation's structure: use get_org for which room maps to which "
+    "store, what each room is for (store chat vs all-captains vs marketing), who is active "
+    "in each store (likely works there), and who the admins/managers are — for any "
+    "'who works at X', 'who's the manager', or 'who is <person>' question.\n"
     "- You can act: close or assign tasks directly when asked — just do it and confirm "
     "naturally."
 )
@@ -244,6 +248,20 @@ _READ_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {"store": {"type": "string", "description": "Optional store filter"}},
+            "required": [],
+        },
+    },
+    {
+        "name": "get_org",
+        "description": "Understand the operation's structure: which rooms are which "
+                       "(store chats vs all-captains vs marketing), what store each maps to, "
+                       "who is active in each store (likely works there), and who the "
+                       "admins/managers are. Use for 'who works at X', 'who's the manager of "
+                       "X', 'what rooms/stores do we have', or 'who is <person>' questions. "
+                       "Optionally filter by a store or person.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"store": {"type": "string", "description": "Optional store or person filter"}},
             "required": [],
         },
     },
@@ -434,6 +452,32 @@ def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> st
                 if r.get("discrepancy_gallons"): p.append(f"DIFF {r['discrepancy_gallons']} gal")
                 out.append(" · ".join(p))
             return "\n".join(out)
+        if name == "get_org":
+            from app import org
+            q = str(args.get("store", "")).lower().strip()
+            rooms = org.describe_rooms_live()
+            people = org.roster_live()
+            stores = [r for r in rooms if r["purpose"] == "store"]
+            other = sorted({r["purpose"] for r in rooms if r["purpose"] != "store"})
+            if q:
+                stores = [r for r in stores if q in (r["room_name"] or "").lower()
+                          or q in (r.get("store") or "").lower()]
+            lines = [f"ROOMS — {len(stores)} store chats"
+                     + (f", plus {', '.join(other)}" if other and not q else "") + ":"]
+            for r in stores[:30]:
+                lines.append(f"• {r['room_name']} → {r.get('store') or '?'}")
+            sel = {s: v for s, v in people.items()
+                   if not q or q in s.lower() or (v.get("home_store") and q in v["home_store"].lower())}
+            admins = sorted([s for s, v in sel.items() if v["is_admin"]])
+            if admins:
+                lines.append("Admins/managers: " + ", ".join(admins))
+            top = sorted(sel.items(), key=lambda kv: kv[1]["messages"], reverse=True)[:15]
+            if top:
+                lines.append("People (most active → likely home store):")
+                for s, v in top:
+                    lines.append(f"• {s}{' [admin]' if v['is_admin'] else ''} — "
+                                 f"{v.get('home_store') or 'multiple/unknown'}")
+            return "\n".join(lines) if len(lines) > 1 else "No org data captured yet."
         if name == "get_cash_reconcile":
             from app import cash_reconcile
             rows = cash_reconcile.discrepancies(only_flagged=False)

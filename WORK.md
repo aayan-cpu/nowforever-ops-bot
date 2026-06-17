@@ -42,6 +42,7 @@
 
 ## Done
 
+- [x] (DONE) **Org understanding** — app/org.py: classifies each room (store/all-captains/marketing), maps room→store (via sites.py), builds a people roster (who's active where = home store), flags admins/managers; get_org brain tool + prompt so the bot answers who-works-where / who's-the-manager / what-rooms questions. [pc-mgr]
 - [x] (DONE) **Broadcast to ALL store chats** — broadcast tool now posts an announcement into every store room the bot is in (scope=all_stores, default), not just all-captains; reports reached/failed. [pc-mgr]
 - [x] (DONE) **Cold-DM creation** — bot can now START a DM with any org Workspace user via spaces.setup (no need for them to message first); dm_email uses ensure_dm_space (find-or-create). Needs live verification of Chat app DM perms; falls back gracefully. [pc-mgr]
 - [x] (DONE) **Day-report CASH VENDOR / COMPANY GAS alerts** — OCR reads cash_vendor + company_gas; if either is non-zero (not allowed), DM admin2 (OPS_VENDOR_ALERT_EMAIL) + flag for review; 5 tests. [pc-mgr]
