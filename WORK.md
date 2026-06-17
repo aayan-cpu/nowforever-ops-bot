@@ -29,7 +29,6 @@
 
 
 - [ ] (ASSIGNED:desktop-ebh1kd9-8341) **Dashboard surfaces reconcile + scorecard** — render fuel-reconcile mismatches and per-store scorecard in the HTML views. mainly: app/reports.py  branch: —
-- [ ] (TODO) **Report cutoff + late flagging** — config per-store expected report times; flag late once timestamps land. mainly: app/digests.py  branch: —
 - [ ] (TODO) **Veeder-Root reading OCR** — parse tank-gauge reading photos (complements BOL OCR). mainly: app/vision.py  branch: —
 
 ## In progress
@@ -42,6 +41,7 @@
 
 ## Done
 
+- [x] (DONE) **Report cutoff + late flagging** — per-store expected report times, flag late [worker 3575, merged by pc-mgr]
 - [x] (DONE) **Near-duplicate task dedupe** — collapse repeated messages into one task [worker 3575, merged by pc-mgr]
 - [x] (DONE) **Brain API resilience** — retry/backoff+timeout for Claude REST call [worker 3575, merged by pc-mgr]
 - [x] (DONE) **Docs audit** — fixed stale module/SQLite refs in docs/ [worker 8341, merged by pc-mgr]
