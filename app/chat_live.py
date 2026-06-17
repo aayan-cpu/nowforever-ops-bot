@@ -340,6 +340,36 @@ def should_reply(event: dict, c_priority: str | None = None) -> bool:
     return ("nowforever" in text or "ops bot" in text or "@now" in text)
 
 
+HELP_TEXT = (
+    "I can help with:\n"
+    "• *summary* — ops overview\n"
+    "• *alerts* — open high-priority items\n"
+    "• *tasks* — open task list\n"
+    "• *reports* — latest daily-report figures\n"
+    "• *close task #N* / *assign task #N to <name>*\n"
+    "• *show <room>* — a store's recent activity\n"
+    "Or just ask me a question."
+)
+
+
+def _format_reports(rows: list[dict], limit: int = 8) -> str:
+    """Render recent daily-report figures. Pure (no I/O) so it is unit-testable.
+    Matches the field shape written by analyze_images / read by brain.get_reports."""
+    if not rows:
+        return ("No daily-report figures yet. (Report photos may not be scanned, "
+                "or none posted recently.)")
+    rows = sorted(rows, key=lambda r: r.get("report_date") or "", reverse=True)[:limit]
+    lines = ["📋 Latest daily reports"]
+    for r in rows:
+        parts = [str(r.get("room_name") or "?")]
+        if r.get("report_date"): parts.append(f"date {r['report_date']}")
+        if r.get("shift"): parts.append(f"shift {r['shift']}")
+        if r.get("total_sales") is not None: parts.append(f"sales ${r['total_sales']}")
+        if r.get("fuel_gallons_sold") is not None: parts.append(f"{r['fuel_gallons_sold']} gal")
+        lines.append("• " + " · ".join(parts))
+    return "\n".join(lines)
+
+
 def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> str | None:
     """Return a reply for an EXACT command, or None for anything conversational
     (so the caller routes it to the AI brain). Commands must be the whole message
@@ -367,6 +397,10 @@ def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> st
         res = task_action(db_path, tid, "assign", assignee)
         return f"Assigned #{tid} to {assignee}." if res.get("ok") else f"Could not assign #{tid}: {res.get('error')}"
 
+    # Help / command list — available to everyone, never a blank ack.
+    if low in {"help", "commands", "menu", "?", "what can you do"}:
+        return HELP_TEXT
+
     # Quick read-only commands — only when the message IS the command.
     if low in {"summary", "dashboard", "what happened", "what happened today", "status"}:
         if not admin:
@@ -389,7 +423,7 @@ def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> st
         return "\n".join(["🚨 High Priority Alerts"] +
                          [f"• [{a['room_name']}] {(a.get('message') or '')[:160]}" for a in alerts])
 
-    if low in {"tasks", "open tasks", "task list", "list tasks", "open items"}:
+    if low in {"tasks", "task", "open tasks", "task list", "list tasks", "open items"}:
         if not admin:
             return None
         tasks = open_tasks(db_path, limit=10)
@@ -397,6 +431,11 @@ def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> st
             return "No open tasks found."
         return "\n".join(["✅ Open Tasks"] +
                          [f"• #{t['id']} [{t['room_name']}] {t.get('task_title') or t.get('task_text')}" for t in tasks])
+
+    if low in {"reports", "report", "daily reports", "daily report"}:
+        if not admin:
+            return None
+        return _format_reports(store.list_all("day_reports"))
 
     # Everything else (incl. "show me…", "what's going on at 4?") → AI brain.
     return None
@@ -409,7 +448,8 @@ def default_ack(msg: dict, c, task_id: int | None) -> str:
         return f"{icon} Logged {c.priority} task #{task_id}\nSite/room: {msg['room_name']}\nCategory: {pick_primary_category(c.categories)}\nAssignee: {c.assigned_hint or 'unassigned'}"
     if c.priority == "high":
         return f"🚨 High-priority message detected in {msg['room_name']}. I logged it for review."
-    return "Got it."
+    # Never a bare "Got it." — give the user something actionable to do next.
+    return "Got it. Try *summary*, *alerts*, *tasks*, or *reports* — or just ask me a question."
 
 
 def is_direct_message(event: dict) -> bool:
