@@ -17,8 +17,24 @@ There are two kinds of session:
 - **WORKER** (Mac, second PC, etc.): claims one task at a time and implements it
   on a branch.
 
-If you don't know which you are, **ask the human** at the start of the session.
-Pick a unique session-id (e.g. `mac-A`, `pc2-B`).
+If the human hasn't said which you are, assume **WORKER** unless you're running on
+the 24/7 PC `DESKTOP-EBH1KD9` (that one is the manager `pc-mgr`).
+
+## Worker startup ritual (do this FIRST, before anything else)
+
+Don't ask the human for an id — generate your own and register:
+
+```bash
+git pull --rebase
+SESSION_ID=$(bash scripts/agent_register.sh | tail -n1)   # e.g. "macbook-air-4827"
+echo "I am worker $SESSION_ID"
+```
+
+That registers you in `.agents/<id>.log` and pushes it, so the manager can see
+you're online. Use `$SESSION_ID` in every claim below. Re-run
+`bash scripts/agent_register.sh heartbeat "$SESSION_ID"` every ~10 min so the
+manager knows you're still alive (a CLAIMED task with no heartbeat >30 min gets
+reclaimed). Then immediately claim a task per the protocol below.
 
 ## Worker protocol (follow exactly)
 
