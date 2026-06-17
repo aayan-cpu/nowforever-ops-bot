@@ -11,16 +11,13 @@ from __future__ import annotations
 import os
 from datetime import date, datetime, timezone
 
-from app import reports, chat_media, brain, store
+from app import reports, chat_media, brain, store, sites
 
 ESCALATE_HOURS = float(os.getenv("OPS_ESCALATE_HOURS", "36"))
 
 ALL_CAPTAINS = os.getenv("OPS_ALL_CAPTAINS_SPACE", "spaces/AAAAhO6H0_Y")
 OFFICES = os.getenv("OPS_OFFICES_SPACE", "spaces/AAAAaIRkgq8")
 ADMIN_DM = os.getenv("OPS_ADMIN_DM_SPACE", "spaces/6AxGNyAAAAE")  # aayan ↔ bot DM
-
-# Spaces that are not individual stations (excluded from missing-report checks).
-_NON_STATION = {"All Captains Chat", "SUMMERBELL CAMPUS COMMUNICATIONS GROUP"}
 
 
 def _high_open_tasks(limit: int = 50) -> list[dict]:
@@ -72,13 +69,15 @@ def missing_reports() -> dict:
     rooms, reported = set(), set()
     for m in msgs:
         rn = m.get("room_name") or ""
-        if not rn or rn in _NON_STATION or rn.lower().startswith("direct message") or rn.startswith("spaces/"):
+        if not sites.is_station(rn):  # skips company-wide rooms, DMs, raw space ids
             continue
-        rooms.add(rn)
+        # Group by canonical site so "11" and "11 N&F Windchase" count once.
+        canon = sites.canonical_name(rn)
+        rooms.add(canon)
         ts = (m.get("created_at") or m.get("timestamp_raw") or "")[:10]
         cats = m.get("categories") or ""
         if ts == today and ("daily_shift_report" in cats or "day_report" in cats):
-            reported.add(rn)
+            reported.add(canon)
     missing = sorted(rooms - reported)
     if not missing:
         ok = chat_media.post_to_space(ADMIN_DM, "✅ All stations have posted a daily report today.")
