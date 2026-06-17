@@ -11,7 +11,7 @@ from app.reports import (
     render_dashboard_html, render_tasks_html, render_alerts_html, render_room_html
 )
 from app.chat_live import handle_google_chat_event, ingest_live_event, google_chat_response
-from app import digests
+from app import digests, chat_auth
 
 # Kept for backward compat with callers/tests; data now lives in Firestore (app/store.py).
 DB_PATH = os.getenv("OPS_DB_PATH", "data/ops_bot.sqlite3")
@@ -113,6 +113,12 @@ class OpsHandler(BaseHTTPRequestHandler):
             # Live Google Chat HTTP endpoint. Configure Google Chat API to this URL:
             # https://YOUR-SERVICE-URL/chat/events
             if path in {"/chat/events", "/google-chat/events"}:
+                # Verify the Google-signed bearer token (no-op unless
+                # OPS_VERIFY_CHAT_TOKEN=1) so only Google Chat can drive the bot.
+                ok, reason = chat_auth.verify_request(self.headers)
+                if not ok:
+                    print(f"[chat_auth] rejected /chat/events: {reason}", flush=True)
+                    return send_json(self, {"error": "unauthorized", "reason": reason}, 401)
                 try:
                     event = json.loads(raw_body or "{}")
                 except json.JSONDecodeError:
