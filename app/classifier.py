@@ -136,9 +136,29 @@ def extract_assignees(body: str) -> str | None:
     return ", ".join(out) if out else None
 
 
+# Mention forms to strip out of a task title. ORDER MATTERS: known multi-word /
+# numbered company aliases first (e.g. "@Admin 4"), then any single
+# whitespace-free @token. The old single regex "@\s*[A-Za-z0-9._ -]+" included a
+# SPACE in its class, so it ate past the mention into the next words until it hit
+# a char not in the class (comma, apostrophe) — turning "@Admin 2,666 gallons"
+# into ",666 gallons" and "@Admin didn't ..." into "'t ...". These patterns never
+# cross a space except for the explicit known aliases. The (?![\d,]) guard stops
+# "@Admin 2,666" being misread as admin #2 (it falls through to the generic rule,
+# which strips only "@Admin" and keeps the "2,666" quantity).
+_TITLE_MENTION_RES = (
+    re.compile(r"@\s*(?:admin\s*\d+(?![\d,])|admin\d+|moin|annus\s+nadeem|ar\s+r)", re.I),
+    re.compile(r"@\s*[A-Za-z0-9._-]+"),
+)
+
+
 def title_from_message(body: str) -> str:
     one = re.sub(r"\s+", " ", body or "").strip()
-    one = re.sub(r"@\s*[A-Za-z0-9._ -]+", "", one).strip()
+    for rgx in _TITLE_MENTION_RES:
+        one = rgx.sub("", one)
+    # collapse the gap a removed mention may leave, then drop any dangling leading
+    # punctuation (e.g. "@john, fix pump" -> ", fix pump" -> "fix pump").
+    one = re.sub(r"\s{2,}", " ", one)
+    one = re.sub(r"^[\s,;:.\-]+", "", one).strip()
     if not one:
         return "Attachment/report needs review"
     return one[:120] + ("..." if len(one) > 120 else "")
