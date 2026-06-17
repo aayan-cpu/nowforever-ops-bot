@@ -23,6 +23,7 @@
 > Each task is independent. The file each mainly touches is noted so two workers
 > don't fight over the same file — prefer claiming tasks that touch different files.
 
+- [ ] (TODO) **Response quality / anti-hallucination** — bot gives vague/made-up answers. Likely cause: `_snapshot()` in `app/brain.py` feeds the model too little live data (kept tiny for tokens). Audit what the snapshot actually contains live, widen grounding, tighten the system prompt to refuse when data is absent. Needs example bad Q&As from the owner. mainly: app/brain.py  branch: —
 - [ ] (TODO) **Webhook bearer-token verification** for `/chat/events` (security hole: accepts any request). NOTE FROM MANAGER: Google Chat sends `Authorization: Bearer <JWT>` signed by `chat@system.gserviceaccount.com`, audience = the project number. `cryptography` is NOT installed (breaks on Py 3.14) — do RS256 verification the stdlib way, mirroring the JWT *signing* pattern already in `app/chat_media.py:_sa_key_token`. Verify sig (Google x509 certs, cached), `iss`, `aud` (new env `OPS_CHAT_AUDIENCE`), `exp`. Gate behind env `OPS_VERIFY_CHAT_TOKEN=1` so it can't dark the live bot before the audience is configured. New module `app/chat_auth.py`; wire into `app/server.py` do_POST `/chat/events`. mainly: app/chat_auth.py (new), app/server.py  branch: —
 - [ ] (TODO) **Dashboard auth** for `/dashboard`, `/tasks`, `/alerts` — token-based (e.g. `?token=` / `X-Ops-Token` vs new `OPS_DASHBOARD_TOKEN`), gated so it stays open when the env var is unset. mainly: app/server.py  branch: —
 - [ ] (TODO) **Weekly digest job** (per-room summary) — add a `JOBS` entry in `app/digests.py` (follow the existing daily-summary job), wired to `/cron/<name>`. mainly: app/digests.py  branch: —
@@ -44,6 +45,7 @@
 
 ## Done
 
+- [x] (DONE) **Live incident fix** — uptime flapping ("Ops Bot Down" alerts). Single-threaded HTTPServer let a 45s Claude call block the health probe; switched to ThreadingHTTPServer + added cheap `/healthz`. NEEDS DEPLOY + repoint uptime check to /healthz + `--min-instances=1`. [pc-mgr]
 - [x] (DONE) Fix README architecture drift (fake modules, FastAPI→http.server, SQLite→Firestore, room mapping note). [pc-mgr]
 - [x] (DONE) Firestore persistence — already implemented: live path uses `app/store.py` (Firestore REST); SQLite (`app/database.py`) remains only for the offline Vault ingest. No migration needed. [verified pc-mgr]
 - [x] (DONE) Escalation (SLA) job + get_scorecard tool.
