@@ -623,5 +623,23 @@ def handle_google_chat_event(event: dict, db_path: str = DB_PATH) -> dict:
             reply = ai
 
     if will_reply:
+        # Store the bot's OWN reply in a DM so the /dms view shows the full
+        # conversation (both sides). Marked is_duplicate so it never shows as an
+        # alert/task; /dms includes it because it's is_dm.
+        if reply and is_direct_message(event) and result.get("space_id"):
+            try:
+                _now = datetime.now(timezone.utc).isoformat()
+                store.create("messages", {
+                    "seq": store.next_seq("messages"),
+                    "room_id": result.get("space_id"),
+                    "room_name": result.get("room_name") or "",
+                    "is_dm": True, "is_bot_reply": True,
+                    "sender": "NowAndForever Ops Bot",
+                    "message": reply, "priority": "normal",
+                    "is_task": False, "is_duplicate": True,
+                    "created_at": _now, "sent_at": _now,
+                })
+            except Exception as e:
+                print(f"[reply-store] {e}", flush=True)
         return google_chat_response(reply)
     return google_chat_response("")  # empty -> {} -> no visible message in the room

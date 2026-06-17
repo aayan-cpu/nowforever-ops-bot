@@ -519,22 +519,42 @@ def render_messages_html(db_path=None, room=None, q=None, dms_only=False, limit=
     return "".join(parts)
 
 
+def _is_bot_msg(m: dict) -> bool:
+    return bool(m.get("is_bot_reply")) or "Ops Bot" in (m.get("sender") or "")
+
+
 def render_dms_html(db_path=None) -> str:
     msgs = [m for m in store.list_all("messages") if m.get("is_dm")]
-    by_person: dict = {}
-    for m in _sort_recent(msgs):
-        by_person.setdefault(m.get("sender") or "?", []).append(m)
-    parts = [HTML_HEAD, f"<body><main><h1>Bot DMs <span>({len(by_person)} people · {len(msgs)} msgs)</span></h1>",
+    # Group by DM space so each person's conversation (both sides) is together.
+    by_space: dict = {}
+    for m in msgs:
+        by_space.setdefault(m.get("room_id") or m.get("sender") or "?", []).append(m)
+
+    def person_of(ms):
+        for m in ms:
+            if not _is_bot_msg(m) and (m.get("sender") or ""):
+                return m["sender"]
+        return ms[0].get("sender") or "?"
+
+    # newest conversation first
+    convos = sorted(by_space.values(),
+                    key=lambda ms: max((x.get("sent_at") or "") for x in ms), reverse=True)
+    parts = [HTML_HEAD, f"<body><main><h1>Bot DMs <span>({len(convos)} conversations · {len(msgs)} msgs)</span></h1>",
              "<p><a href='/dashboard'>← Dashboard</a> · <a href='/messages'>All messages</a></p>",
-             "<p><small>What people have sent the bot in DMs. (The bot's own replies aren't stored "
-             "here — Google Vault has the full two-sided thread.)</small></p>"]
-    for person, ms in sorted(by_person.items(),
-                             key=lambda kv: kv[1][0].get("sent_at") or "", reverse=True):
+             "<p><small>Full DM threads — the person's messages and the bot's replies. "
+             "(Replies are stored from now on; older threads show the person's side only — "
+             "Google Vault has the complete history.)</small></p>"]
+    for ms in convos:
+        person = person_of(ms)
+        ms_sorted = sorted(ms, key=lambda x: (x.get("sent_at") or "", x.get("seq") or 0))
         parts.append(f"<section><h2>{html.escape(person)} <small>({len(ms)})</small></h2>")
-        for m in ms[:50]:
+        for m in ms_sorted[-60:]:
             ts = html.escape((m.get("sent_at") or m.get("timestamp_raw") or "")[:19])
-            parts.append(f"<article class='item'><small>{ts}</small>"
-                         f"<p>{html.escape((m.get('message') or '')[:1000])}</p></article>")
+            bot = _is_bot_msg(m)
+            who = "🤖 Bot" if bot else f"🧑 {html.escape(person)}"
+            style = " style='background:#eef5ff'" if bot else ""
+            parts.append(f"<article class='item'{style}><small>{who} · {ts}</small>"
+                         f"<p>{html.escape((m.get('message') or '')[:1200])}</p></article>")
         parts.append("</section>")
     parts.append("</main></body></html>")
     return "".join(parts)
