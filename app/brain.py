@@ -354,16 +354,40 @@ _ACTION_TOOLS = [
     },
     {
         "name": "broadcast",
-        "description": "Post an announcement to the all-captains Chat space (reaches everyone "
-                       "at once). Use when an admin asks to announce / broadcast / tell everyone "
-                       "something. For a single person, use message_user instead.",
+        "description": "Announce a message to Chat rooms. scope='all_stores' (default) posts it "
+                       "into EVERY store chat the bot is in — use this when the admin says to tell "
+                       "all stores / every store / everyone. scope='captains' posts only to the "
+                       "all-captains space. For one person, use message_user instead.",
         "input_schema": {
             "type": "object",
-            "properties": {"message": {"type": "string", "description": "The announcement text"}},
+            "properties": {
+                "message": {"type": "string", "description": "The announcement text"},
+                "scope": {"type": "string", "enum": ["all_stores", "captains"],
+                          "description": "all_stores = every store chat (default); captains = all-captains space only"},
+            },
             "required": ["message"],
         },
     },
 ]
+
+
+def _rooms_from_messages(messages, dm_spaces) -> list:
+    """(space, room_name) for the distinct group rooms in `messages`, excluding DM
+    spaces. Pure + unit-testable; first room_name seen for a space wins."""
+    seen: dict[str, str] = {}
+    for m in messages or []:
+        sp = (m.get("room_id") or "")
+        if sp.startswith("spaces/") and sp not in dm_spaces and sp not in seen:
+            seen[sp] = m.get("room_name") or sp
+    return list(seen.items())
+
+
+def store_room_spaces() -> list:
+    """Live: the store chats the bot can post to — derived from ingested messages
+    (rooms it's a member of), minus the bot's own DM spaces."""
+    dm = {os.getenv("OPS_ADMIN_DM_SPACE", "")}
+    dm |= {d.get("space") for d in store.list_all("admin_dms") if d.get("space")}
+    return _rooms_from_messages(store.list_all("messages"), dm)
 
 
 def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> str:
@@ -526,9 +550,22 @@ def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> st
             text = str(args.get("message", "")).strip()
             if not text:
                 return "What should I announce?"
-            space = os.getenv("OPS_ALL_CAPTAINS_SPACE", "spaces/AAAAhO6H0_Y")
-            ok = chat_media.post_to_space(space, f"📢 {text}")
-            return "Announcement posted to all captains." if ok else "Couldn't post the announcement."
+            body = f"📢 {text}"
+            scope = str(args.get("scope", "all_stores")).lower()
+            if scope == "captains":
+                space = os.getenv("OPS_ALL_CAPTAINS_SPACE", "spaces/AAAAhO6H0_Y")
+                return ("Announcement posted to all-captains."
+                        if chat_media.post_to_space(space, body) else "Couldn't post the announcement.")
+            rooms = store_room_spaces()
+            if not rooms:
+                return "I don't have any store rooms on record to post to yet."
+            sent, failed = [], []
+            for sp, rn in rooms:
+                (sent if chat_media.post_to_space(sp, body) else failed).append(rn)
+            res = f"📢 Sent to {len(sent)} store chat(s)."
+            if failed:
+                res += f" Couldn't reach {len(failed)}: {', '.join(failed[:8])}{'…' if len(failed) > 8 else ''}."
+            return res
     except Exception as e:
         return f"Tool error: {e}"
     return f"Unknown tool {name}"

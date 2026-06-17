@@ -84,21 +84,38 @@ class MessageUserDispatchTests(unittest.TestCase):
 
 
 class BroadcastDispatchTests(unittest.TestCase):
-    def test_posts_with_megaphone_prefix(self):
+    def test_captains_scope_posts_with_megaphone_prefix(self):
         with patch("app.chat_media.post_to_space", return_value=True) as m:
-            out = brain._run_tool("broadcast", {"message": "Store meeting at 5pm"})
-        self.assertIn("posted to all captains", out)
-        space, text = m.call_args[0][0], m.call_args[0][1]
+            out = brain._run_tool("broadcast", {"message": "Store meeting at 5pm", "scope": "captains"})
+        self.assertIn("all-captains", out)
+        text = m.call_args[0][1]
         self.assertTrue(text.startswith("📢 "))
         self.assertIn("Store meeting at 5pm", text)
+
+    def test_all_stores_posts_to_every_room(self):
+        rooms = [("spaces/A", "4 Channelview"), ("spaces/B", "11 Windchase")]
+        with patch("app.brain.store_room_spaces", return_value=rooms), \
+             patch("app.chat_media.post_to_space", return_value=True) as m:
+            out = brain._run_tool("broadcast", {"message": "freeze prep tonight"})
+        self.assertIn("2 store chat", out)
+        self.assertEqual(m.call_count, 2)  # one post per room
+
+    def test_all_stores_reports_failures(self):
+        rooms = [("spaces/A", "4 Channelview"), ("spaces/B", "11 Windchase")]
+        with patch("app.brain.store_room_spaces", return_value=rooms), \
+             patch("app.chat_media.post_to_space", side_effect=[True, False]):
+            out = brain._run_tool("broadcast", {"message": "x", "scope": "all_stores"})
+        self.assertIn("1 store chat", out)
+        self.assertIn("Couldn't reach 1", out)
+        self.assertIn("11 Windchase", out)
 
     def test_empty_message(self):
         out = brain._run_tool("broadcast", {"message": "   "})
         self.assertIn("What should I announce", out)
 
-    def test_post_failure(self):
+    def test_captains_post_failure(self):
         with patch("app.chat_media.post_to_space", return_value=False):
-            out = brain._run_tool("broadcast", {"message": "hello"})
+            out = brain._run_tool("broadcast", {"message": "hello", "scope": "captains"})
         self.assertIn("Couldn't post", out)
 
 
