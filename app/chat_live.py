@@ -138,6 +138,9 @@ def extract_chat_event(event: dict) -> dict:
         "room_name": str(room_name),
         "sender": normalize_sender(str(sender)),
         "timestamp_raw": str(timestamp),
+        # Normalized ISO-8601 UTC send-time (when the message was posted), so the
+        # bot can reason about when reports landed and flag late/missing-by-cutoff.
+        "sent_at": store.normalize_ts(timestamp),
         "message": text,
         "attachments": " | ".join(attachments),
         "attachment_count": len(attachments),
@@ -265,7 +268,8 @@ def ingest_live_event(event: dict, db_path: str = DB_PATH) -> dict:
     message_doc = store.create("messages", {
         "seq": store.next_seq("messages"),
         "room_id": msg["room_id"], "room_name": msg["room_name"], "data_id": msg["data_id"],
-        "sender": msg["sender"], "timestamp_raw": msg["timestamp_raw"], "message": msg["message"],
+        "sender": msg["sender"], "timestamp_raw": msg["timestamp_raw"],
+        "sent_at": msg["sent_at"], "message": msg["message"],
         "attachments": msg["attachments"], "attachment_count": msg["attachment_count"],
         "categories": category_string(c.categories), "priority": priority,
         "is_task": bool(is_task),
@@ -306,6 +310,9 @@ def ingest_live_event(event: dict, db_path: str = DB_PATH) -> dict:
                 "priority": priority, "assigned_hint": c.assigned_hint,
                 "assignee": c.assigned_hint, "status": "open", "source_fingerprint": c.fingerprint,
                 "dedupe_key": c.dedupe_key,
+                # created_at = when we logged it; sent_at = when the captain posted
+                # the originating message (for late/overdue/by-cutoff reasoning).
+                "sent_at": msg["sent_at"],
                 "confidence": c.confidence, "created_at": now, "updated_at": now,
             }, doc_id=str(task_id))
 
