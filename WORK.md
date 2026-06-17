@@ -20,10 +20,8 @@
 
 ## Backlog
 
-- [ ] (TODO) Fix doc/code mismatch — README references `app/room_mappings.py`, `app/task_manager.py`, `app/alert_detector.py` which don't exist. Update docs to match real modules (`brain.py`, `classifier.py`, `store.py`, ...).  branch: —
 - [ ] (TODO) Verify Google Chat webhook bearer token in `/chat/events` (currently accepts all requests — security hole).  branch: —
 - [ ] (TODO) Add dashboard auth for `/dashboard`, `/tasks`, `/alerts` (token-based or IAP).  branch: —
-- [ ] (TODO) Migrate persistence off ephemeral SQLite → Firestore or Cloud SQL (data wiped on Cloud Run restart).  branch: —
 - [ ] (TODO) Weekly digest job (per-room summary).  branch: —
 - [ ] (TODO) Site-name normalization across rooms.  branch: —
 - [ ] (TODO) Missing/overdue report detection + reminders.  branch: —
@@ -38,5 +36,7 @@
 
 ## Done
 
+- [x] (DONE) Fix README architecture drift (fake modules, FastAPI→http.server, SQLite→Firestore, room mapping note). [pc-mgr]
+- [x] (DONE) Firestore persistence — already implemented: live path uses `app/store.py` (Firestore REST); SQLite (`app/database.py`) remains only for the offline Vault ingest. No migration needed. [verified pc-mgr]
 - [x] (DONE) Escalation (SLA) job + get_scorecard tool.
 - [x] (DONE) Cloud Run deploy pipeline.
