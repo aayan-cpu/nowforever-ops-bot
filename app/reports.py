@@ -72,6 +72,68 @@ def high_priority(db_path: str | None = None, limit: int = 50) -> list[dict]:
     return _sort_recent(rows)[:limit]
 
 
+# Categories that count as a station's daily/shift report being posted.
+_REPORT_CATEGORIES = ("daily_shift_report", "day_report")
+# A site is "overdue" once it hasn't reported for this many days (incl. today).
+OVERDUE_DAYS = 2
+
+
+def _is_report(m: dict) -> bool:
+    return any(c in (m.get("categories") or "") for c in _REPORT_CATEGORIES)
+
+
+def report_status(messages: list[dict], as_of: str, overdue_days: int = OVERDUE_DAYS) -> dict:
+    """Pure: from a message list, work out per-station daily-report standing.
+
+    A station is any room that ``sites.is_station`` accepts, keyed by canonical
+    name so "11" and "11 N&F Windchase" count once. ``as_of`` is a YYYY-MM-DD day.
+
+    Returns ``{as_of, sites, reported, missing, overdue}`` where ``overdue`` is
+    ``[{site, last_report, days_since}]`` for stations whose most recent report
+    is ``overdue_days`` or more days old (``last_report`` None = never reported).
+    """
+    last_report: dict[str, str] = {}   # canonical site -> latest report date seen
+    seen: set[str] = set()
+    for m in messages:
+        rn = m.get("room_name") or ""
+        if not sites.is_station(rn):
+            continue
+        site = sites.canonical_name(rn)
+        seen.add(site)
+        if _is_report(m):
+            day = (m.get("created_at") or m.get("timestamp_raw") or "")[:10]
+            if day and day > last_report.get(site, ""):
+                last_report[site] = day
+
+    reported = sorted(s for s in seen if last_report.get(s) == as_of)
+    missing = sorted(s for s in seen if last_report.get(s) != as_of)
+
+    overdue = []
+    for s in sorted(seen):
+        last = last_report.get(s)
+        days = _days_between(last, as_of) if last else None
+        if days is None or days >= overdue_days:
+            overdue.append({"site": s, "last_report": last, "days_since": days})
+    return {"as_of": as_of, "sites": sorted(seen),
+            "reported": reported, "missing": missing, "overdue": overdue}
+
+
+def _days_between(start_day: str, end_day: str) -> int | None:
+    try:
+        a = datetime.strptime(start_day[:10], "%Y-%m-%d")
+        b = datetime.strptime(end_day[:10], "%Y-%m-%d")
+        return (b - a).days
+    except (ValueError, TypeError):
+        return None
+
+
+def missing_daily_reports(as_of: str | None = None, overdue_days: int = OVERDUE_DAYS) -> dict:
+    """Live entry point: report_status over all stored messages for ``as_of``
+    (defaults to today, UTC)."""
+    as_of = as_of or datetime.now(timezone.utc).date().isoformat()
+    return report_status(store.list_all("messages"), as_of, overdue_days)
+
+
 def room_summary(db_path: str | None, room: str) -> dict:
     needle = (room or "").lower()
     target_key = sites.site_key(room)  # e.g. "windchase" and "11" both -> "11"
