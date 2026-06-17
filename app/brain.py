@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import ssl
+import time
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone, timedelta
@@ -40,6 +42,17 @@ API_KEY_ENV = "ANTHROPIC_API_KEY"
 MODEL = os.getenv("OPS_BRAIN_MODEL", "claude-opus-4-8")
 ENDPOINT = "https://api.anthropic.com/v1/messages"
 _ctx = ssl.create_default_context()
+
+# Resilience for the Claude REST call: a transient API hiccup (rate limit,
+# overloaded, gateway, network blip, timeout) shouldn't silently drop a user's
+# reply. Retry those with exponential backoff; never retry a real client error
+# (400/401/403/404) since it won't fix itself. All tunable via env.
+BRAIN_TIMEOUT = float(os.getenv("OPS_BRAIN_TIMEOUT", "45"))
+BRAIN_MAX_ATTEMPTS = max(1, int(os.getenv("OPS_BRAIN_MAX_ATTEMPTS", "3")))
+BRAIN_BACKOFF_BASE = float(os.getenv("OPS_BRAIN_BACKOFF_BASE", "1.0"))
+BRAIN_BACKOFF_MAX = float(os.getenv("OPS_BRAIN_BACKOFF_MAX", "30"))
+_RETRY_STATUS = {429, 500, 502, 503, 504, 529}
+_sleep = time.sleep  # indirection so tests don't actually wait
 
 # Stable persona — sent as a cacheable system block to keep cost down.
 PERSONA = (
@@ -488,6 +501,25 @@ def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> st
     return f"Unknown tool {name}"
 
 
+def _post_once(payload: bytes) -> dict:
+    """Single POST to the Claude Messages endpoint. Raises on HTTP/network error."""
+    req = urllib.request.Request(ENDPOINT, data=payload, headers={
+        "x-api-key": os.environ[API_KEY_ENV],
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    })
+    return json.loads(urllib.request.urlopen(req, context=_ctx, timeout=BRAIN_TIMEOUT).read())
+
+
+def _retry_after(err: urllib.error.HTTPError) -> float | None:
+    """Honor a numeric Retry-After header (seconds) if the server sent one."""
+    try:
+        v = err.headers.get("Retry-After")
+        return float(v) if v else None
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
 def _call_claude(messages: list, tools: list | None) -> dict:
     body = {
         "model": MODEL,
@@ -500,12 +532,29 @@ def _call_claude(messages: list, tools: list | None) -> dict:
     }
     if tools:
         body["tools"] = tools
-    req = urllib.request.Request(ENDPOINT, data=json.dumps(body).encode(), headers={
-        "x-api-key": os.environ[API_KEY_ENV],
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-    })
-    return json.loads(urllib.request.urlopen(req, context=_ctx, timeout=45).read())
+    payload = json.dumps(body).encode()
+
+    for attempt in range(1, BRAIN_MAX_ATTEMPTS + 1):
+        try:
+            return _post_once(payload)
+        except urllib.error.HTTPError as e:
+            # Client errors (bad request, auth) won't fix themselves — fail fast.
+            # The caller (answer) reads the body, so don't consume it here.
+            if e.code not in _RETRY_STATUS or attempt == BRAIN_MAX_ATTEMPTS:
+                raise
+            delay = _retry_after(e) or BRAIN_BACKOFF_BASE * (2 ** (attempt - 1))
+            reason = f"HTTP {e.code}"
+        except (urllib.error.URLError, TimeoutError, socket.timeout) as e:
+            if attempt == BRAIN_MAX_ATTEMPTS:
+                raise
+            delay = BRAIN_BACKOFF_BASE * (2 ** (attempt - 1))
+            reason = type(e).__name__
+        delay = min(delay, BRAIN_BACKOFF_MAX)
+        print(f"[brain] transient {reason} (attempt {attempt}/{BRAIN_MAX_ATTEMPTS}); "
+              f"retrying in {delay:.1f}s", flush=True)
+        _sleep(delay)
+    # Loop always returns or raises above; this satisfies type-checkers.
+    raise RuntimeError("unreachable: claude retry loop exited without result")
 
 
 def _conv_id(space_id: str) -> str:
