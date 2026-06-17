@@ -176,6 +176,44 @@ def ocr_pass(batch: int = 6) -> dict:
     return result
 
 
+def backfill_dm_flag() -> dict:
+    """Tag existing messages that are DMs (is_dm=True) by matching their room_id
+    against the bot's actual DM spaces from the Chat API — fixes the /dms view
+    missing older DMs that were ingested before DM detection existed."""
+    tok = chat_media.get_chat_token()
+    dm_spaces = set()
+    page = ""
+    while tok:
+        url = _API + '/spaces?pageSize=100&filter=space_type%20%3D%20%22DIRECT_MESSAGE%22'
+        if page:
+            url += "&pageToken=" + page
+        try:
+            data = _api_get(url, tok)
+        except Exception as e:
+            print(f"[dm-backfill] list: {e}", flush=True)
+            break
+        for s in data.get("spaces", []):
+            if s.get("name"):
+                dm_spaces.add(s["name"])
+        page = data.get("nextPageToken", "")
+        if not page:
+            break
+    if not dm_spaces:
+        return {"dm_spaces": 0, "tagged": 0, "note": "no DM spaces from Chat API"}
+    tagged = 0
+    for m in store.list_all("messages"):
+        if m.get("is_dm"):
+            continue
+        if (m.get("room_id") or "") in dm_spaces:
+            try:
+                store.patch("messages", m["id"], {"is_dm": True})
+                tagged += 1
+            except Exception:
+                pass
+    print(f"[dm-backfill] {len(dm_spaces)} DM spaces, tagged {tagged}", flush=True)
+    return {"dm_spaces": len(dm_spaces), "tagged": tagged}
+
+
 def clear_day_report_alerts() -> dict:
     """One-time: clear day-report REVIEW/flag alerts (the noisy 'needs review' /
     flagged-field items) — closing the tasks and pulling their messages out of the

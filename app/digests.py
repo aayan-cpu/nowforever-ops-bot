@@ -308,12 +308,19 @@ def clear_dr_alerts() -> dict:
     return {"ok": True, "kind": "clear_dr_alerts", **sync.clear_day_report_alerts()}
 
 
+def backfill_dms() -> dict:
+    """Tag older DM messages so they show in the /dms view."""
+    from app import sync
+    return {"ok": True, "kind": "backfill_dms", **sync.backfill_dm_flag()}
+
+
 JOBS = {
     "sync": sync_messages,
     "ocr-pass": ocr_pass,
     "remap-rooms": remap_rooms,
     "purge-bot-echo": purge_bot_echo,
     "clear-dr-alerts": clear_dr_alerts,
+    "backfill-dms": backfill_dms,
     "morning-digest": morning_digest,
     "urgent-reminder": urgent_reminder,
     "missing-reports": missing_reports,
