@@ -103,6 +103,10 @@ PERSONA = (
     "answering. For store questions you MUST call lookup_site (the OPS DATA sample is "
     "incomplete per store — never answer from it alone or say 'the rest isn't broken out'). "
     "No links needed — just the timestamp.\n"
+    "- To send/post a message in ONE store's chat, ALWAYS use post_to_room (goes ONLY to that "
+    "store). NEVER use broadcast for a single store — broadcast posts to EVERY store at once "
+    "and is only for an explicit 'tell all stores / everyone' request. When unsure, use "
+    "post_to_room or ask which scope.\n"
     "- You can act: close or assign tasks directly when asked — just do it and confirm "
     "naturally."
 )
@@ -381,18 +385,33 @@ _ACTION_TOOLS = [
     },
     {
         "name": "broadcast",
-        "description": "Announce a message to Chat rooms. scope='all_stores' (default) posts it "
-                       "into EVERY store chat the bot is in — use this when the admin says to tell "
-                       "all stores / every store / everyone. scope='captains' posts only to the "
-                       "all-captains space. For one person, use message_user instead.",
+        "description": "⚠️ Posts to EVERY store chat at once. ONLY use when the admin EXPLICITLY "
+                       "says all stores / every store / everyone / broadcast. If they name ONE "
+                       "store (or say 'in <store>'), use post_to_room instead — do NOT broadcast. "
+                       "scope='captains' posts only to the all-captains space.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "message": {"type": "string", "description": "The announcement text"},
                 "scope": {"type": "string", "enum": ["all_stores", "captains"],
-                          "description": "all_stores = every store chat (default); captains = all-captains space only"},
+                          "description": "all_stores = EVERY store chat; captains = all-captains space only"},
             },
-            "required": ["message"],
+            "required": ["message", "scope"],
+        },
+    },
+    {
+        "name": "post_to_room",
+        "description": "Post a message into ONE specific store's chat (only that store, NOT "
+                       "everyone). Use whenever the user names a single store — 'send/post a "
+                       "message in <store>', 'ask <store> ...', 'tell <store> ...'. For ALL "
+                       "stores use broadcast; for a single person use message_user.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "store": {"type": "string", "description": "Store name/number, e.g. '16 Chimney Rock'"},
+                "message": {"type": "string", "description": "The message to post in that store's chat"},
+            },
+            "required": ["store", "message"],
         },
     },
 ]
@@ -663,6 +682,24 @@ def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> st
             res += (" Any store NOT listed here isn't a room I've been added to — add me to its "
                     "chat and I'll reach it next time.")
             return res
+        if name == "post_to_room":
+            from app import chat_media, sites
+            store_q = str(args.get("store", "")).strip()
+            text = str(args.get("message", "")).strip()
+            if not store_q or not text:
+                return "I need both which store and the message to post."
+            rooms = store_chat_spaces()  # (space, room_name)
+            target = None
+            for sp, rn in rooms:
+                if sites.same_site(rn, store_q) or store_q.lower() in (rn or "").lower():
+                    target = (sp, rn)
+                    break
+            if not target:
+                return (f"I couldn't find a store chat matching '{store_q}'. "
+                        f"Tell me the exact store name or number.")
+            ok = chat_media.post_to_space(target[0], text)
+            return (f"Posted to {target[1]}: \"{text[:80]}\"" if ok
+                    else f"Couldn't post to {target[1]}.")
     except Exception as e:
         return f"Tool error: {e}"
     return f"Unknown tool {name}"
