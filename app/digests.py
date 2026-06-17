@@ -314,6 +314,12 @@ def backfill_dms() -> dict:
     return {"ok": True, "kind": "backfill_dms", **sync.backfill_dm_flag()}
 
 
+def clear_dm_tasks() -> dict:
+    """Close issues/alerts that came from DM messages (one-time cleanup)."""
+    from app import sync
+    return {"ok": True, "kind": "clear_dm_tasks", **sync.clear_dm_tasks()}
+
+
 def gas_report_reminder() -> dict:
     """Daily reminder broadcast to every store chat to send the gas/day report.
     Message is editable via OPS_GAS_REPORT_MSG."""
@@ -331,6 +337,7 @@ JOBS = {
     "remap-rooms": remap_rooms,
     "purge-bot-echo": purge_bot_echo,
     "clear-dr-alerts": clear_dr_alerts,
+    "clear-dm-tasks": clear_dm_tasks,
     "backfill-dms": backfill_dms,
     "gas-report-reminder": gas_report_reminder,
     "morning-digest": morning_digest,

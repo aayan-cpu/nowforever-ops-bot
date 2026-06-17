@@ -244,6 +244,33 @@ def clear_day_report_alerts() -> dict:
     return {"review_tasks_closed": closed, "messages_downgraded": downgraded}
 
 
+def clear_dm_tasks() -> dict:
+    """Close issues/alerts that came from DM messages (the owner's own DM commands
+    shouldn't become store issues). Downgrades the DM messages and closes any open
+    task that originated from one."""
+    dm_ids = set()
+    downgraded = 0
+    for m in store.list_all("messages"):
+        if m.get("is_dm"):
+            dm_ids.add(m.get("id"))
+            if m.get("priority") == "high" or m.get("is_task"):
+                try:
+                    store.patch("messages", m["id"], {"priority": "normal", "is_task": False})
+                    downgraded += 1
+                except Exception:
+                    pass
+    closed = 0
+    for t in store.list_all("tasks"):
+        if (t.get("status") or "open") == "open" and t.get("message_id") in dm_ids:
+            try:
+                store.patch("tasks", t["id"], {"status": "closed"})
+                closed += 1
+            except Exception:
+                pass
+    print(f"[clear-dm] downgraded {downgraded} msgs, closed {closed} tasks", flush=True)
+    return {"messages_downgraded": downgraded, "dm_tasks_closed": closed}
+
+
 def purge_bot_echo() -> dict:
     """Downgrade the bot's OWN posts (broadcasts/digests/alerts) that the sync
     re-ingested before the BOT filter existed, so they stop showing as alerts/tasks.
