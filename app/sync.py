@@ -89,7 +89,7 @@ def sync_once(per_room: int = 25, max_new_per_room: int = 40) -> dict:
             if _already_have(m.get("name")):
                 continue
             try:
-                ingest_live_event(to_event(space, m))
+                ingest_live_event(to_event(space, m), analyze=False)  # text-only: fast + cheap
                 ingested += 1
                 new_here += 1
                 if new_here >= max_new_per_room:

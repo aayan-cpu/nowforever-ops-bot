@@ -291,8 +291,10 @@ def _open_task_by_dedupe(dedupe_key: str) -> dict | None:
     return None
 
 
-def ingest_live_event(event: dict, db_path: str = DB_PATH) -> dict:
-    """Classify + store one Google Chat event in Firestore. Creates a task if action-worthy."""
+def ingest_live_event(event: dict, db_path: str = DB_PATH, analyze: bool = True) -> dict:
+    """Classify + store one Google Chat event in Firestore. Creates a task if action-worthy.
+    `analyze=False` skips the (slow, paid) image AI — used by the bulk message sync so it
+    can cover every room quickly on text; images get OCR'd by a throttled pass later."""
     msg = extract_chat_event(event)
     c = classify_message(msg["message"], msg["attachment_count"], msg["room_name"])
     category = pick_primary_category(c.categories)
@@ -308,7 +310,7 @@ def ingest_live_event(event: dict, db_path: str = DB_PATH) -> dict:
 
     # Auto-read only OPERATIONAL images (reports, BOLs, deliveries, equipment, money).
     # Other photos are still logged; the bot reads them on demand if someone asks.
-    vis = analyze_images(msg) if _is_operational(c, msg["message"]) else _no_vision()
+    vis = analyze_images(msg) if (analyze and _is_operational(c, msg["message"])) else _no_vision()
     priority = "high" if vis["needs_review"] else c.priority
     is_task = c.is_task or vis["needs_review"]
 
