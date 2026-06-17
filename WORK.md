@@ -26,13 +26,13 @@
 - [ ] (ASSIGNED:desktop-ebh1kd9-8686) **Message timestamps in ingestion** — bot can't see message send-times, so it can't tell when shift/day reports were posted or flag late/missing-by-cutoff. Carry the Chat message timestamp through ingest → store → snapshot. mainly: app/ingest.py, app/chat_live.py, app/store.py  branch: —
 - [ ] (DONE-PARTIAL) Response-quality root cause FIXED (grounding on complete aggregates, commit 0f4255f). Remaining quality items split into the 4 tasks above. NEEDS DEPLOY to take effect.
 - [ ] (ASSIGNED:desktop-ebh1kd9-0832) **Webhook bearer-token verification** for `/chat/events` (security hole: accepts any request). NOTE FROM MANAGER: Google Chat sends `Authorization: Bearer <JWT>` signed by `chat@system.gserviceaccount.com`, audience = the project number. `cryptography` is NOT installed (breaks on Py 3.14) — do RS256 verification the stdlib way, mirroring the JWT *signing* pattern already in `app/chat_media.py:_sa_key_token`. Verify sig (Google x509 certs, cached), `iss`, `aud` (new env `OPS_CHAT_AUDIENCE`), `exp`. Gate behind env `OPS_VERIFY_CHAT_TOKEN=1` so it can't dark the live bot before the audience is configured. New module `app/chat_auth.py`; wire into `app/server.py` do_POST `/chat/events`. mainly: app/chat_auth.py (new), app/server.py  branch: —
-- [ ] (TODO) **Scoped roles** (docs/ROLES.md "Planned") — `roles` map (email→role) with permission + store scope below admin. mainly: new app/roles.py + brain/command handlers  branch: —
-- [ ] (TODO) **Audit remaining docs for stale module refs** — README is fixed; sweep `docs/*.md` for references to nonexistent modules / outdated SQLite-as-live claims. mainly: docs/  branch: —
 
-- [ ] (ASSIGNED:desktop-ebh1kd9-3575) **CI: run the test suite on PRs** — add `.github/workflows/tests.yml` running `py -m unittest discover -s tests` on push/PR (great now that there are 141 tests). mainly: .github/workflows/ (new)  branch: —
-- [ ] (ASSIGNED:desktop-ebh1kd9-8341) **Site-aware classifier** (Phase 3) — improve `app/classifier.py` to use room/site context for better category + priority accuracy. mainly: app/classifier.py  branch: —
-- [ ] (TODO) **Brain API resilience** — add retry/backoff + timeout handling for the Claude REST call in `app/brain.py` so a transient API error doesn't drop a user's reply. mainly: app/brain.py  branch: —
-- [ ] (TODO) **POS integration scaffold** (Phase 5) — stub `app/pos.py` defining the interface for pulling sales/inventory, with a fake adapter + tests. mainly: app/pos.py (new)  branch: —
+- [ ] (ASSIGNED:desktop-ebh1kd9-3575) **Brain API resilience** — add retry/backoff + timeout handling for the Claude REST call in `app/brain.py` so a transient API error doesn't drop a user's reply. mainly: app/brain.py  branch: —
+
+- [ ] (ASSIGNED:desktop-ebh1kd9-8341) **Dashboard surfaces reconcile + scorecard** — render fuel-reconcile mismatches and per-store scorecard in the HTML views. mainly: app/reports.py  branch: —
+- [ ] (TODO) **Report cutoff + late flagging** — config per-store expected report times; flag late once timestamps land. mainly: app/digests.py  branch: —
+- [ ] (TODO) **Near-duplicate task dedupe** — collapse repeated "need gas" style messages into one task. mainly: app/classifier.py  branch: —
+- [ ] (TODO) **Veeder-Root reading OCR** — parse tank-gauge reading photos (complements BOL OCR). mainly: app/vision.py  branch: —
 
 ## In progress
 
@@ -44,6 +44,11 @@
 
 ## Done
 
+- [x] (DONE) **Docs audit** — fixed stale module/SQLite refs in docs/ [worker 8341, merged by pc-mgr]
+- [x] (DONE) **POS integration scaffold** — app/pos.py interface + fake adapter + tests [worker 8686, merged by pc-mgr]
+- [x] (DONE) **Scoped roles** — email→role map w/ permission+store scope (app/roles.py) [worker 8341, merged by pc-mgr]
+- [x] (DONE) **Site-aware classifier** — room/site context for better category+priority [worker 8341, merged by pc-mgr]
+- [x] (DONE) **CI workflow** — GitHub Actions runs the 210-test suite on push/PR [worker 3575, merged by pc-mgr]
 - [x] (DONE) **OCR for BOL / fuel-delivery receipts** [worker 8341, merged by pc-mgr]
 - [x] (DONE) **Missing/overdue report detection + reminders** [worker 3575, merged by pc-mgr]
 - [x] (DONE) **Veeder-Root vs BOL reconciliation** — app/reconcile.py BOL-vs-gauge mismatch detection + tests [worker 8341, merged by pc-mgr]
