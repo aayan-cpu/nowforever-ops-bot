@@ -42,6 +42,7 @@
 
 ## Done
 
+- [x] (DONE) **Alert recency window** — escalation + urgent-reminder only consider issues posted within OPS_ALERT_WINDOW_DAYS (default 3), keyed on sent_at; stops ancient Vault-imported tasks (1000+ days) from being escalated as urgent. [pc-mgr]
 - [x] (DONE) **Message sync — read ALL messages** — app/sync.py pulls recent messages from every room via Chat API (read scope) and ingests them, fixing the core gap that Google Chat only forwards @mentions. Stores like Harwin/Synott/Bissonnet/Fry/Coastal that were blind are now tracked. Cron job 'sync'. [pc-mgr]
 - [x] (DONE) **Bot DMs/messages dashboard** — /dms (DMs grouped by person) + /messages (searchable), behind OPS_DASHBOARD_TOKEN; is_dm captured on ingest. [pc-mgr]
 - [x] (DONE) **Broadcast reliability** — broadcast now targets rooms via Chat API spaces.list (reaches quiet rooms the bot is in, not just ones with recent messages), filters DM/test junk, lists which stores it reached; post_to_space gained retry/backoff for transient/429 failures. Fixes 'didn't reach Synott'. [pc-mgr]

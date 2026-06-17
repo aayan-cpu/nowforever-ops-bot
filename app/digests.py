@@ -14,6 +14,9 @@ from datetime import datetime, timezone
 from app import reports, chat_media, brain, store, reconcile
 
 ESCALATE_HOURS = float(os.getenv("OPS_ESCALATE_HOURS", "36"))
+# Alerts only consider issues posted within this many days — so ancient imported
+# history (e.g. 1000-day-old Vault tasks) never gets escalated as "urgent".
+ALERT_WINDOW_HOURS = float(os.getenv("OPS_ALERT_WINDOW_DAYS", "3")) * 24
 
 ALL_CAPTAINS = os.getenv("OPS_ALL_CAPTAINS_SPACE", "spaces/AAAAhO6H0_Y")
 OFFICES = os.getenv("OPS_OFFICES_SPACE", "spaces/AAAAaIRkgq8")
@@ -54,8 +57,9 @@ def morning_digest() -> dict:
 
 
 def urgent_reminder() -> dict:
-    """Midday — remind on still-open urgent items."""
-    tasks = _high_open_tasks(20)
+    """Midday — remind on still-open urgent items posted within the alert window."""
+    tasks = [t for t in _high_open_tasks(300)
+             if _issue_age_hours(t) <= ALERT_WINDOW_HOURS][:20]
     if not tasks:
         return {"ok": True, "kind": "urgent_reminder", "skipped": "none open"}
     lines = ["🚨 *Still-open urgent items* — please update or resolve:"]
@@ -149,14 +153,23 @@ def _age_hours(created_at: str, now: datetime | None = None) -> float:
         return 0.0
 
 
+def _issue_age_hours(t: dict, now: datetime | None = None) -> float:
+    """Age by when the issue was actually POSTED (sent_at), falling back to when we
+    logged it — so alerts reason about the real event time, not ingest time."""
+    return _age_hours(t.get("sent_at") or t.get("created_at") or "", now)
+
+
 def escalation() -> dict:
-    """Escalate high-priority tasks still open past the SLA window to admins."""
-    stale = [(_age_hours(t.get("created_at", "")), t)
-             for t in _high_open_tasks(200)]
-    stale = sorted([(a, t) for a, t in stale if a >= ESCALATE_HOURS], reverse=True)
+    """Escalate high-priority tasks open past the SLA window — but only ones posted
+    within the alert window (ignore ancient imported history)."""
+    now = datetime.now(timezone.utc)
+    stale = [(_issue_age_hours(t, now), t) for t in _high_open_tasks(300)]
+    stale = sorted([(a, t) for a, t in stale
+                    if ESCALATE_HOURS <= a <= ALERT_WINDOW_HOURS], reverse=True)
     if not stale:
         return {"ok": True, "kind": "escalation", "stale": 0}
-    lines = [f"⏰ *Escalation — {len(stale)} urgent item(s) open past {int(ESCALATE_HOURS)}h:*"]
+    win_d = int(ALERT_WINDOW_HOURS // 24)
+    lines = [f"⏰ *Escalation — {len(stale)} urgent item(s) open {int(ESCALATE_HOURS)}h–{win_d}d:*"]
     for age, t in stale[:15]:
         d, h = int(age // 24), int(age % 24)
         ago = (f"{d}d " if d else "") + f"{h}h"
