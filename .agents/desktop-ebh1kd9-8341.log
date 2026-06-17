@@ -7,3 +7,5 @@
 2026-06-17T15:50:12Z heartbeat (desktop-ebh1kd9-8341)
 2026-06-17T15:52:36Z ready for review: feat/receipt-ocr__desktop-ebh1kd9-8341 (BOL/receipt per-product OCR in vision.py, backfills bol_gallons, 15 tests, suite 111 green)
 2026-06-17T15:52:36Z heartbeat (desktop-ebh1kd9-8341)
+2026-06-17T15:56:22Z ready for review: feat/docs-audit__desktop-ebh1kd9-8341 (removed nonexistent app/room_mappings.py refs, fixed SQLite-as-live -> Firestore in LIMITATIONS/DEPLOYMENT/ROOM_MAPPINGS; docs-only)
+2026-06-17T15:56:22Z heartbeat (desktop-ebh1kd9-8341)
