@@ -94,6 +94,9 @@ PERSONA = (
     "store, what each room is for (store chat vs all-captains vs marketing), who is active "
     "in each store (likely works there), and who the admins/managers are — for any "
     "'who works at X', 'who's the manager', or 'who is <person>' question.\n"
+    "- When the user asks about a specific issue/message ('where did Annus mention SSCS', "
+    "'show me where they said the pumps are down'), use search_history and include the "
+    "🔗 link it returns so the user can jump straight to the original message.\n"
     "- You can act: close or assign tasks directly when asked — just do it and confirm "
     "naturally."
 )
@@ -422,6 +425,21 @@ def store_chat_spaces() -> list:
     return [(sp, rn) for sp, rn in store_room_spaces() if sites.is_station(rn)]
 
 
+def _message_link(m: dict) -> str:
+    """Google Chat deep link to a stored message, built from its data_id
+    (spaces/<space>/messages/<msg>). '' if it isn't a real Chat message id."""
+    data_id = m.get("data_id") or ""
+    if "/messages/" not in data_id:
+        return ""
+    try:
+        space = data_id.split("/messages/", 1)[0].replace("spaces/", "")
+        msg_id = data_id.split("/messages/", 1)[1]
+        kind = "dm" if m.get("is_dm") else "room"
+        return f"https://chat.google.com/{kind}/{space}/{msg_id}"
+    except Exception:
+        return ""
+
+
 def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> str:
     from app import reports
     try:
@@ -542,9 +560,16 @@ def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> st
             if not hits:
                 return "Nothing in the history matches that."
             hits = sorted(hits, key=lambda m: (m.get("seq") or 0, m.get("created_at") or ""), reverse=True)[:15]
-            return "\n".join(
-                f"[{m.get('room_name')}] {m.get('sender')} ({(m.get('created_at') or m.get('timestamp_raw') or '')[:10]}): "
-                f"{(m.get('message') or '')[:160]}" for m in hits)
+            out = []
+            for m in hits:
+                day = (m.get("sent_at") or m.get("created_at") or m.get("timestamp_raw") or "")[:10]
+                line = (f"[{m.get('room_name')}] {m.get('sender')} ({day}): "
+                        f"{(m.get('message') or '')[:160]}")
+                link = _message_link(m)
+                if link:
+                    line += f"\n  🔗 {link}"
+                out.append(line)
+            return "\n".join(out)
         if name == "create_task":
             tid = store.next_seq("tasks")
             now = datetime.now(timezone.utc).isoformat()
