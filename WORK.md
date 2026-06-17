@@ -23,11 +23,9 @@
 > Each task is independent. The file each mainly touches is noted so two workers
 > don't fight over the same file — prefer claiming tasks that touch different files.
 
-- [ ] (ASSIGNED:desktop-ebh1kd9-8686) **Message timestamps in ingestion** — bot can't see message send-times, so it can't tell when shift/day reports were posted or flag late/missing-by-cutoff. Carry the Chat message timestamp through ingest → store → snapshot. mainly: app/ingest.py, app/chat_live.py, app/store.py  branch: —
 - [ ] (DONE-PARTIAL) Response-quality root cause FIXED (grounding on complete aggregates, commit 0f4255f). Remaining quality items split into the 4 tasks above. NEEDS DEPLOY to take effect.
 
 
-- [ ] (TODO) **Veeder-Root reading OCR** — parse tank-gauge reading photos (complements BOL OCR). mainly: app/vision.py  branch: —
 
 
 ## In progress
@@ -40,6 +38,8 @@
 
 ## Done
 
+- [x] (DONE) **Veeder-Root reading OCR** [worker 8341, merged by pc-mgr]
+- [x] (DONE) **Message timestamps in ingestion** [worker 8686, merged by pc-mgr]
 - [x] (DONE) **Multi-turn conversation memory** [worker 3575, merged by pc-mgr]
 - [x] (DONE) **Dashboard reconcile + scorecard view** [worker 8341, merged by pc-mgr]
 - [x] (DONE) **Proactive reconciliation alerts** — high-priority alert on BOL/Veeder mismatch over threshold [worker 3575, merged by pc-mgr]
