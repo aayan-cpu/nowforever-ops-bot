@@ -82,13 +82,27 @@ def sync_once(per_room: int = 25, max_new_per_room: int = 40) -> dict:
         return {"spaces": len(spaces), "scanned": 0, "ingested": 0,
                 "errors": 0, "note": "no spaces or no read token"}
 
+    backfilled = 0
     for space, name in spaces:
         msgs = list_recent_messages(space, read_tok, per_room)
         new_here = 0
         # oldest-first so tasks/threads land in chronological order
         for m in reversed(msgs):
             scanned += 1
-            if _already_have(m.get("name")):
+            found = store.find("messages", "data_id", m.get("name"), limit=1)
+            if found:
+                # Backfill OCR flag for image messages stored before refs were captured.
+                doc = found[0]
+                if (not doc.get("needs_ocr") and (doc.get("vision") in (None, "", "[]"))
+                        and (m.get("attachment") or m.get("attachments"))):
+                    refs = chat_media.image_attachments(m)
+                    if refs:
+                        try:
+                            store.patch("messages", doc["id"],
+                                        {"needs_ocr": True, "image_refs": json.dumps(refs)})
+                            backfilled += 1
+                        except Exception:
+                            pass
                 continue
             try:
                 ingest_live_event(to_event(space, m, name), analyze=False)  # text-only: fast + cheap
@@ -99,8 +113,8 @@ def sync_once(per_room: int = 25, max_new_per_room: int = 40) -> dict:
             except Exception as e:
                 errors += 1
                 print(f"[sync] ingest err {m.get('name')}: {e}", flush=True)
-    result = {"spaces": len(spaces), "scanned": scanned,
-              "ingested": ingested, "errors": errors}
+    result = {"spaces": len(spaces), "scanned": scanned, "ingested": ingested,
+              "ocr_backfilled": backfilled, "errors": errors}
     print(f"[sync] {result}", flush=True)
     return result
 
