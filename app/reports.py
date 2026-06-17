@@ -4,7 +4,7 @@ import html
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from app import store
+from app import store, sites
 
 
 def _sort_recent(rows: list[dict]) -> list[dict]:
@@ -74,7 +74,15 @@ def high_priority(db_path: str | None = None, limit: int = 50) -> list[dict]:
 
 def room_summary(db_path: str | None, room: str) -> dict:
     needle = (room or "").lower()
-    matched = [m for m in store.list_all("messages") if needle in (m.get("room_name") or "").lower()]
+    target_key = sites.site_key(room)  # e.g. "windchase" and "11" both -> "11"
+
+    def _hit(m: dict) -> bool:
+        rn = m.get("room_name") or ""
+        if needle in rn.lower():  # preserve original substring match (incl. "" -> all)
+            return True
+        return bool(target_key) and sites.site_key(rn) == target_key
+
+    matched = [m for m in store.list_all("messages") if _hit(m)]
     stats = None
     if matched:
         # Pick the busiest matching room name as the canonical one.
