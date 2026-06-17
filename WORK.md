@@ -30,6 +30,8 @@
 
 - [ ] (PARKED) **SSCS integration** (TOP next priority) — see docs/FUTURE_INTEGRATIONS.md. Needs discovery first (how N&F updates the CDB: desktop keying vs POS poller/XML vs file import). Do NOT auto-assign; owner-led. mainly: docs/FUTURE_INTEGRATIONS.md + (future) app/sscs.py
 
+- [ ] (PARKED) **Smart vendor ordering & demand forecasting** — captains order via bot; forecast-driven (best profit, least waste). After SSCS + POS. First target: fuel reordering. See docs/FUTURE_INTEGRATIONS.md. mainly: (future) app/ordering.py
+
 ## In progress
 
 <!-- claimed rows move here -->

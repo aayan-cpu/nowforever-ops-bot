@@ -40,6 +40,39 @@ out **how Now & Forever actually updates it.** Open questions to resolve:
 
 **Status:** parked — owner wants to pursue this next; needs the discovery above first.
 
+## ⭐ Smart vendor ordering & demand forecasting (high-value — after SSCS)
+
+**Vision (owner, 2026-06-17):** let store captains order inventory from vendors
+*through the bot*, with the bot recommending **what and how much to order** using
+logic + forecasting — optimizing for **best operation, best profit, least waste**
+(no stockouts, no overstock/spoilage). This is the clearest "takes real work off
+people" agent feature.
+
+**Core capability = per-store demand forecasting,** then turn the forecast into a
+concrete order. Factors: sales velocity per item/category, day-of-week & seasonality,
+promotions, shelf-life/spoilage (perishables), vendor lead times, and par (min/max)
+levels. Goal metrics to optimize: minimize lost sales (stockouts) + minimize waste
+(overstock) + best margin (order timing, quantity, vendor pricing).
+
+**Dependencies (mostly the same as SSCS/POS work):**
+- **Sales + inventory data** — needs POS integration (already planned) for velocity
+  and current stock; SSCS/CDB may also hold purchase/inventory history.
+- **Vendor ordering channels** — how each vendor takes orders (API, email/EDI, portal).
+- **Par levels & budgets** per store, set with the captains.
+
+**Tiers (build trust one step at a time):**
+1. **Recommend** — bot suggests an order (items + quantities) per vendor; captain
+   reviews/adjusts and places it. Needs sales/inventory data only.
+2. **Draft & send** — on captain approval, bot submits the order to the vendor.
+3. **Auto-reorder within guardrails** — bot reorders automatically inside par levels
+   + budget caps, captain notified. Highest trust.
+
+**First concrete instance = fuel reordering.** We already have tank-level signals
+(Veeder-Root) + BOL/Veeder reconciliation, and "need gas" is the most repeated
+request in the chats — predictable fuel reordering is the natural first target.
+
+**Status:** parked — capture now, build after SSCS discovery + POS integration.
+
 ## Calendar (planned — "soon")
 
 **Scope:** `https://www.googleapis.com/auth/calendar` (DWD; impersonates a user to
