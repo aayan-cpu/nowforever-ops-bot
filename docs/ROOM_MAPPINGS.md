@@ -6,9 +6,17 @@ This document tracks the mapping between Google Chat Space IDs and the physical 
 
 ## Why This Matters
 
-Google Chat identifies rooms by their **Space ID** (e.g., `AAAAayKiMyg`), not by their display name. When the bot receives a webhook event, it receives the Space ID. To show human-readable site names in the dashboard and alerts, the Space ID must be mapped to a site name.
+Google Chat events carry both a **Space ID** (e.g., `spaces/AAAAayKiMyg`) and,
+in most events, the room's **display name**. The live bot reads the human-readable
+room name straight from the event (`space.displayName` in
+`app/chat_live.py:extract_chat_event`), falling back to the Space ID only when no
+display name is present.
 
-This mapping lives in `app/room_mappings.py` as a Python dictionary.
+There is **no** `app/room_mappings.py` module. Canonical site identity — unifying
+"11", "Windchase", and "11 N&F Windchase" into one site — lives in `app/sites.py`,
+which is seeded from the confirmed sites in this document. The Space ID ↔ site
+table below is reference data for that seed and for back-filling room names on
+events that arrive without a display name.
 
 ---
 
@@ -58,38 +66,26 @@ Once the bot is deployed and added to a room, it receives the Space ID in every 
 
 ---
 
-## Room Mappings Python Code
+## Space ID ↔ Site reference data
 
-Copy this into `app/room_mappings.py` and fill in the TBD values:
+The live bot does not need a hand-maintained Space ID → name dictionary — it
+reads the display name from each event. This table is reference data: it seeds
+`app/sites.py` (canonical site identity) and documents the confirmed Space IDs
+for back-filling room names on events that lack a display name.
 
 ```python
-# app/room_mappings.py
-# Maps Google Chat Space IDs to human-readable site names
-
-ROOM_MAPPINGS = {
-    # Confirmed mappings
+# Confirmed Space ID -> room display name (reference; see app/sites.py for the
+# canonical site registry built from these).
+SPACE_NAMES = {
     "AAAAAyLVEg0": "11 N&F Windchase",
     "AAAAayKiMyg": "4 Channelview",
     "AAAAhO6H0_Y": "All Captains Chat",
     "AAAA3s2JArA": "12 S Main Stafford",
     "AAAAox_RoBo": "27 Fry",
-
-    # TODO: Add Space IDs for remaining sites
-    # "SPACE_ID_HERE": "1 Coastal Mart",
-    # "SPACE_ID_HERE": "9 Bissonnet",
-    # "SPACE_ID_HERE": "18 Harwin & Gessener",
-    # "SPACE_ID_HERE": "24 Galveston",
-    # "SPACE_ID_HERE": "29 Westheimer",
+    # Remaining sites (1 Coastal Mart, 9 Bissonnet, 18 Harwin & Gessener,
+    # 24 Galveston, 29 Westheimer, ...) still need their Space IDs confirmed
+    # from the Chat admin console.
 }
-
-def get_site_name(space_id: str) -> str:
-    """Return site name for a given Space ID, or the Space ID itself if unknown."""
-    return ROOM_MAPPINGS.get(space_id, f"Unknown Site ({space_id})")
-
-def get_space_id(site_name: str) -> str | None:
-    """Return Space ID for a given site name, or None if not found."""
-    reverse = {v: k for k, v in ROOM_MAPPINGS.items()}
-    return reverse.get(site_name)
 ```
 
 ---
@@ -114,4 +110,5 @@ High priority rooms to map first (based on current open issues):
 
 ---
 
-*Update this file whenever a new Space ID is confirmed. Keep `app/room_mappings.py` in sync.*
+*Update this file whenever a new Space ID is confirmed, and add the site to the
+seed in `app/sites.py` if it introduces a new number/location alias.*

@@ -25,21 +25,22 @@ The development machine runs Python 3.14, which breaks several packages due to C
 
 ---
 
-## 2. SQLite Ephemeral Storage on Cloud Run
+## 2. SQLite Ephemeral Storage on Cloud Run — RESOLVED
 
-**Severity: High (production impact)**
+**Severity: Resolved (was High)**
 
-Cloud Run is a stateless serverless platform. Containers are spun up and torn down automatically. The SQLite database stored at `data/ops_bot.sqlite3` is part of the container's writable layer and will be lost when:
-- A new container instance starts (scale-out)
-- A new deployment is made
-- The container is replaced due to a health check failure
+This is fixed: live persistence is **Cloud Firestore via the REST API**
+(`app/store.py`). Firestore is the source of truth for messages and tasks in the
+deployed bot, so the stateless-container problem below no longer affects live data.
 
-**Current workaround:** The `OPS_DB_PATH` environment variable can be set to a path on a mounted Cloud Storage FUSE volume. This requires additional setup.
+SQLite (`app/database.py`, default `data/ops_bot.sqlite3`) is now used **only** for
+the offline Google Vault ingest on a developer machine — it is never the live store.
+Its ephemerality on Cloud Run is therefore moot; `OPS_DB_PATH` only points the
+offline ingest at a local file and has no effect on live persistence.
 
-**Long-term fix (Phase 3):** Migrate to a managed database:
-- **Cloud Firestore** (recommended) — serverless, scales automatically, no ops overhead
-- **Cloud SQL (PostgreSQL)** — if relational schema is needed
-- **Cloud Spanner** — overkill for this use case
+Historical note — the original concern: Cloud Run containers are stateless, so a
+container-local SQLite file is lost on scale-out, redeploy, or health-check
+replacement. That is exactly why the live path moved to Firestore.
 
 ---
 
@@ -157,22 +158,28 @@ Only 5 of the 22+ rooms are mapped in the current code:
 | AAAA3s2JArA | 12 S Main Stafford |
 | AAAAox_RoBo | 27 Fry |
 
-Messages from unmapped rooms are stored with the Space ID as the site name, making them harder to query.
+The live bot reads each room's display name directly from the Chat event
+(`space.displayName`), so most rooms surface a real name without any hand-kept
+mapping. Events that arrive without a display name still fall back to the Space ID.
 
-**Fix (Phase 3):** Complete the `ROOM_MAPPINGS` dictionary in `app/room_mappings.py` for all 22+ rooms. See [ROOM_MAPPINGS.md](./ROOM_MAPPINGS.md) for the full list.
+**Fix (Phase 3):** Confirm the remaining Space IDs (see [ROOM_MAPPINGS.md](./ROOM_MAPPINGS.md))
+and seed any new number/location aliases into `app/sites.py`, the canonical site
+resolver. There is no `app/room_mappings.py`.
 
 ---
 
-## 11. No Attachment / Image Processing
+## 11. Attachment / Image Processing — IMPLEMENTED
 
-**Severity: Medium**
+**Severity: Resolved (was Medium)**
 
-The Vault export contained 1,713 attachments (photos of BOLs, equipment issues, fuel receipts). The current system ignores all attachments.
+Live image understanding is implemented in `app/vision.py` (Claude Messages REST
+API, no SDK), invoked from `app/chat_live.py:analyze_images` for operational
+photos. It extracts BOL gallons, Veeder-Root readings, day-report figures, and
+per-grade fuel line items, and recomputes the BOL-vs-Veeder discrepancy in Python.
+Gated by `OPS_VISION_ENABLED` + `ANTHROPIC_API_KEY` so it stays off until opted in.
 
-**Fix (Phase 5):** Add OCR processing using Google Cloud Vision API or Tesseract to extract:
-- BOL (Bill of Lading) delivery quantities for Veeder-Root comparison
-- Equipment serial numbers from photos
-- Price sign readings
+Remaining (Phase 5): equipment serial-number extraction and price-sign reading are
+not yet specialized.
 
 ---
 
@@ -204,7 +211,7 @@ All 22+ sites share a single bot, single database, and single dashboard. There i
 | # | Limitation | Severity | Phase to Fix |
 |---|---|---|---|
 | 1 | Python 3.14 compatibility | High | Use pyenv locally |
-| 2 | SQLite ephemeral on Cloud Run | High | Phase 3 (Firestore) |
+| 2 | SQLite ephemeral on Cloud Run | Resolved | Firestore live (`app/store.py`) |
 | 3 | No live message ingestion | High | Phase 2 |
 | 4 | No dashboard authentication | High | Phase 2/3 |
 | 5 | Webhook token not verified | High | Phase 2 |
@@ -212,7 +219,7 @@ All 22+ sites share a single bot, single database, and single dashboard. There i
 | 7 | Single region | Low | Phase 4 |
 | 8 | No monitoring | Medium | Phase 3 |
 | 9 | Basic classifier | Medium | Phase 3 |
-| 10 | Incomplete room mapping | Medium | Phase 3 |
-| 11 | No attachment processing | Medium | Phase 5 |
+| 10 | Incomplete room mapping | Medium | Phase 3 (`app/sites.py`) |
+| 11 | Attachment processing | Resolved | `app/vision.py` |
 | 12 | BOL/Veeder mismatch manual | Medium | Phase 5 |
 | 13 | No multi-tenancy | Low | Phase 3/4 |

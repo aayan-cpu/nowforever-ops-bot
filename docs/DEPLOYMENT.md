@@ -79,7 +79,13 @@ You should get a JSON response with the current alert list.
 | Variable | Value | Description |
 |---|---|---|
 | `HOST` | `0.0.0.0` | Bind to all interfaces (required for Cloud Run) |
-| `OPS_DB_PATH` | `data/ops_bot.sqlite3` | Path to the SQLite database |
+| `OPS_DB_PATH` | `data/ops_bot.sqlite3` | Path to the **offline** SQLite file used only by the Vault ingest. Not the live store. |
+| `OPS_GCP_PROJECT` | `nfchatbot-498419` | Firestore project for the **live** store (`app/store.py`). |
+
+**Live persistence is Cloud Firestore (REST), not SQLite.** The runtime service
+account needs `roles/datastore.user`; in Cloud Run the token comes from the
+metadata server automatically. `OPS_DB_PATH` only affects the offline Vault ingest
+and can be ignored for normal deploys.
 
 ---
 
@@ -139,7 +145,9 @@ Or view logs in the Google Cloud Console under Cloud Run > nowforever-chat-ops >
 
 ## Important Limitations
 
-- **SQLite is ephemeral on Cloud Run.** The database resets on each new container instance. See the Known Limitations section in the main README for workarounds.
+- **Live data is in Firestore, not SQLite.** The container-local SQLite file is
+  only for the offline Vault ingest and is ephemeral on Cloud Run, but the live
+  bot reads/writes Firestore (`app/store.py`), which persists across instances.
 - **The service is publicly accessible.** No authentication is currently configured on the dashboard and API endpoints.
 - **Single region only.** No redundancy or failover.
 
