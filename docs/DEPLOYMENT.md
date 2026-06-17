@@ -76,10 +76,21 @@ You should get a JSON response with the current alert list.
 
 ## Environment Variables
 
+The live bot persists to **Cloud Firestore** via REST (`app/store.py`), not
+SQLite. The most relevant variables:
+
 | Variable | Value | Description |
 |---|---|---|
 | `HOST` | `0.0.0.0` | Bind to all interfaces (required for Cloud Run) |
-| `OPS_DB_PATH` | `data/ops_bot.sqlite3` | Path to the SQLite database |
+| `OPS_GCP_PROJECT` | `nfchatbot-498419` | GCP project for the Firestore store |
+| `OPS_FIRESTORE_DB` | `(default)` | Firestore database id |
+| `OPS_SA_KEY` | `/tmp/sa-key.json` | Service-account key path for Firestore + Chat API |
+| `OPS_DASHBOARD_TOKEN` | _(unset)_ | If set, gates `/dashboard`, `/tasks`, `/alerts` |
+| `OPS_CRON_TOKEN` | _(unset)_ | Shared token required on `/cron/<job>` scheduler hits |
+| `OPS_DB_PATH` | `data/ops_bot.sqlite3` | SQLite path — **offline Vault ingest only**, not the live store |
+
+See the bot's own config for the full env surface (vision, brain model, digest
+spaces, escalation window, etc.).
 
 ---
 
@@ -139,8 +150,12 @@ Or view logs in the Google Cloud Console under Cloud Run > nowforever-chat-ops >
 
 ## Important Limitations
 
-- **SQLite is ephemeral on Cloud Run.** The database resets on each new container instance. See the Known Limitations section in the main README for workarounds.
-- **The service is publicly accessible.** No authentication is currently configured on the dashboard and API endpoints.
+- **Persistence is Cloud Firestore** (`app/store.py`), which is durable across
+  container instances — the old "SQLite resets on each instance" risk no longer
+  applies to the live bot (SQLite is now only the offline Vault ingest).
+- **The dashboard/API can be gated.** Set `OPS_DASHBOARD_TOKEN` to require a token
+  on `/dashboard`, `/tasks`, and `/alerts`; left unset, they stay open. (Webhook
+  bearer-token verification for `/chat/events` is in progress — see LIMITATIONS.md #5.)
 - **Single region only.** No redundancy or failover.
 
 ---

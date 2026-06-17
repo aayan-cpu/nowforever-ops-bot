@@ -2,6 +2,12 @@
 
 This document comprehensively covers all known technical constraints, risks, and limitations of the NowForever Ops Bot as of June 2026.
 
+> **Audit note (2026-06-17):** several items below have since shipped and are
+> marked **✅ Resolved** inline. The live bot persists to **Cloud Firestore**
+> (`app/store.py`), not SQLite — SQLite (`app/database.py`) is now used only for
+> the offline Vault ingest. Canonical site resolution lives in `app/sites.py`
+> (there is no `app/room_mappings.py`).
+
 ---
 
 ## 1. Python 3.14 Compatibility
@@ -27,81 +33,72 @@ The development machine runs Python 3.14, which breaks several packages due to C
 
 ## 2. SQLite Ephemeral Storage on Cloud Run
 
-**Severity: High (production impact)**
+**✅ Resolved (Phase 3) — severity was High (production impact)**
 
-Cloud Run is a stateless serverless platform. Containers are spun up and torn down automatically. The SQLite database stored at `data/ops_bot.sqlite3` is part of the container's writable layer and will be lost when:
-- A new container instance starts (scale-out)
-- A new deployment is made
-- The container is replaced due to a health check failure
+This was a real risk *while* SQLite was the live store: Cloud Run is stateless,
+so a `data/ops_bot.sqlite3` file in the container's writable layer was lost on
+scale-out, redeploy, or container replacement.
 
-**Current workaround:** The `OPS_DB_PATH` environment variable can be set to a path on a mounted Cloud Storage FUSE volume. This requires additional setup.
-
-**Long-term fix (Phase 3):** Migrate to a managed database:
-- **Cloud Firestore** (recommended) — serverless, scales automatically, no ops overhead
-- **Cloud SQL (PostgreSQL)** — if relational schema is needed
-- **Cloud Spanner** — overkill for this use case
+**Resolution:** The live bot now persists to **Cloud Firestore** via REST in
+`app/store.py` (serverless, durable across instances). SQLite (`app/database.py`)
+is retained only for the **offline Google Vault ingest** on a developer machine —
+it is never the source of truth at runtime, so its ephemerality no longer matters.
+`OPS_DB_PATH` therefore only affects that offline ingest, not the deployed bot.
 
 ---
 
 ## 3. Historical Data Only — No Live Ingestion Yet
 
-**Severity: High (Phase 2 target)**
+**✅ Resolved (Phase 2) — severity was High**
 
-The current system is seeded from a **Google Vault mbox export** of historical messages. It does not receive or process live messages from Google Chat rooms.
-
-**Impact:** The dashboard and alerts are based on messages up to the date of the Vault export. New operational issues happening in rooms are not captured.
-
-**Fix in progress:** Phase 2 deploys the Cloud Run webhook endpoint and configures Google Chat API to forward messages in real time.
+**Resolution:** The bot is live in Google Chat. `app/server.py` exposes the
+`/chat/events` webhook and `app/chat_live.py` (`ingest_live_event`) classifies and
+stores each incoming message in Firestore in real time. The Vault mbox export is
+now only the historical backfill, not the sole data source.
 
 ---
 
 ## 4. No Dashboard Authentication
 
-**Severity: High (security risk)**
+**✅ Resolved — severity was High (security risk)**
 
-The following endpoints are publicly accessible when deployed with `--allow-unauthenticated`:
-- `/dashboard`
-- `/tasks`
-- `/alerts`
-- `/chat/test`
+**Resolution:** The operational views (`/dashboard`, `/tasks`, `/alerts`, and the
+`?format=json` data) are gated behind a shared token when `OPS_DASHBOARD_TOKEN`
+is set (passed as `?token=` or the `X-Ops-Token` header; verified with an
+`hmac.compare_digest` constant-time check in `app/server.py`). The gate is
+fail-open only when the env var is unset, so existing deploys don't break before
+the token is configured.
 
-Any person with the Cloud Run URL can view all operational data including site issues, task statuses, and message summaries.
-
-**Short-term fix:** Add a simple API key header check:
-```python
-API_KEY = os.environ.get("API_KEY", "")
-if request.headers.get("X-API-Key") != API_KEY:
-    return Response("Unauthorized", status=401)
-```
-
-**Long-term fix:** Use Google Cloud IAP (Identity-Aware Proxy) to gate the dashboard behind Google login.
+**Optional hardening (future):** Use Google Cloud IAP (Identity-Aware Proxy) to
+gate the dashboard behind Google login instead of a shared token.
 
 ---
 
 ## 5. Webhook Token Not Verified
 
-**Severity: High (security risk)**
+**Severity: High (security risk) — fix in progress**
 
-Google Chat sends a bearer token in each webhook request for authenticity verification. The current `/chat/events` handler does not verify this token, meaning:
+Google Chat sends a bearer token in each webhook request for authenticity verification. The current `/chat/events` handler does not yet verify this token, meaning:
 - Any HTTP client can POST to the endpoint and trigger bot responses
 - The bot could be spoofed or spammed
 
-**Fix:** Add token verification to `app/server.py`. The expected token is shown in the Google Chat API Configuration page.
+**Fix (in progress):** Verify the `Authorization: Bearer <JWT>` (signed by
+`chat@system.gserviceaccount.com`) the stdlib way — RS256 against Google's cached
+x509 certs, checking `iss`/`aud`/`exp` — in a new `app/chat_auth.py` wired into
+`app/server.py`. Gated behind `OPS_VERIFY_CHAT_TOKEN=1` (with `OPS_CHAT_AUDIENCE`)
+so it can't dark the live bot before the audience is configured.
 
 ---
 
 ## 6. No Proactive Messaging
 
-**Severity: Medium**
+**✅ Resolved (Phase 4) — severity was Medium**
 
-The bot can only respond to messages it receives via the webhook. It cannot:
-- Send daily digest messages to rooms
-- Alert captains when a task is overdue
-- Notify rooms when a missing report is detected
-
-These require calling the Google Chat REST API with OAuth 2.0 credentials, not just the webhook.
-
-**Fix (Phase 4):** Set up a Cloud Scheduler job to trigger a Cloud Run endpoint daily, which then calls the Chat API to send digests.
+**Resolution:** `app/digests.py` defines scheduled jobs (`JOBS`) — morning digest,
+midday urgent reminder, missing/overdue report detection + reminder, end-of-day
+and weekly summaries, and SLA escalation — posted via `app/chat_media.post_to_space`.
+Cloud Scheduler triggers them by hitting `/cron/<name>` on the bot (gated by
+`OPS_CRON_TOKEN`).
 
 ---
 
@@ -117,15 +114,17 @@ The service is deployed to `us-central1` only. If that GCP region experiences an
 
 ## 8. No Uptime Monitoring or Alerting
 
-**Severity: Medium**
+**Severity: Low (partially resolved)**
 
-There is no:
-- Uptime check on the Cloud Run service
-- PagerDuty / alerting if the service goes down
-- Error rate monitoring
-- Latency tracking
+A cheap `/healthz` probe was added and the server switched to
+`ThreadingHTTPServer` so a slow Claude call can no longer block the health check
+(this had caused "Ops Bot Down" uptime flapping). A Cloud Monitoring uptime check
+points at `/healthz`. Still missing:
+- Error-rate monitoring and latency tracking
+- A paging/escalation policy beyond email
 
-**Fix:** Set up a Google Cloud Monitoring uptime check on the `/alerts` endpoint. Configure an alerting policy to send email to `aayan@khawarsons.com` if the service is down for more than 5 minutes.
+**Fix:** Configure an alerting policy to email `aayan@khawarsons.com` if `/healthz`
+is down for more than 5 minutes, plus error-rate/latency dashboards.
 
 ---
 
@@ -143,49 +142,48 @@ The current message classifier uses keyword matching to categorize messages (gas
 
 ---
 
-## 10. Room-to-Site Mapping Is Incomplete
+## 10. Room-to-Site Mapping
 
-**Severity: Medium**
+**Severity: Low (largely resolved)**
 
-Only 5 of the 22+ rooms are mapped in the current code:
+The live bot no longer depends on a hand-maintained Space-ID → name table: each
+Google Chat event already carries the room's `displayName` (e.g. "4 Channelview"),
+which `app/chat_live.extract_chat_event` records directly. **There is no
+`app/room_mappings.py`** — the planned static dict was superseded by this live
+display name plus `app/sites.py`, which canonicalizes any reference ("11",
+"Windchase", "11 N&F Windchase" → one site). `docs/ROOM_MAPPINGS.md` is kept as a
+reference of confirmed Space IDs.
 
-| Space ID | Room Name |
-|---|---|
-| AAAAAyLVEg0 | 11 N&F Windchase |
-| AAAAayKiMyg | 4 Channelview |
-| AAAAhO6H0_Y | All Captains Chat |
-| AAAA3s2JArA | 12 S Main Stafford |
-| AAAAox_RoBo | 27 Fry |
-
-Messages from unmapped rooms are stored with the Space ID as the site name, making them harder to query.
-
-**Fix (Phase 3):** Complete the `ROOM_MAPPINGS` dictionary in `app/room_mappings.py` for all 22+ rooms. See [ROOM_MAPPINGS.md](./ROOM_MAPPINGS.md) for the full list.
+Remaining gap: messages from a space with no `displayName` fall back to the raw
+Space ID; `app/sites.py` still buckets them consistently but without a friendly
+name until the display name is seen.
 
 ---
 
-## 11. No Attachment / Image Processing
+## 11. Attachment / Image Processing
 
-**Severity: Medium**
+**Severity: Low (largely resolved)**
 
-The Vault export contained 1,713 attachments (photos of BOLs, equipment issues, fuel receipts). The current system ignores all attachments.
+`app/vision.py` analyzes image attachments via the Claude vision API (structured
+output), and `app/chat_live.analyze_images` auto-reads *operational* photos
+(reports, BOLs, deliveries, equipment, money) on ingest, storing day-report and
+fuel figures. Enabled by `ANTHROPIC_API_KEY` + `OPS_VISION_ENABLED=1`.
 
-**Fix (Phase 5):** Add OCR processing using Google Cloud Vision API or Tesseract to extract:
-- BOL (Bill of Lading) delivery quantities for Veeder-Root comparison
-- Equipment serial numbers from photos
-- Price sign readings
+Remaining gap (Phase 5): broaden receipt OCR (gallons/product extraction) and
+equipment serial / price-sign reading robustness.
 
 ---
 
 ## 12. Veeder-Root / BOL Mismatch Not Automated
 
-**Severity: Medium (business risk)**
+**✅ Resolved (Phase 5) — severity was Medium (business risk)**
 
-The 4 Channelview site has a ~2,500 gallon discrepancy between the Veeder-Root tank reading and the BOL delivery receipt. This was caught manually during the Vault data review.
+The 4 Channelview site had a ~2,500 gallon discrepancy between the Veeder-Root tank reading and the BOL delivery receipt, originally caught manually during the Vault data review.
 
-**Fix (Phase 5):** Build an automated reconciliation module that:
-1. Parses BOL PDFs/images with OCR
-2. Fetches Veeder-Root readings (via email reports or direct API if available)
-3. Flags discrepancies above a configurable threshold (e.g., 500 gallons)
+**Resolution:** `app/reconcile.py` reconciles `fuel_events`: it pairs BOL and
+Veeder-Root readings per site and delivery date (and flags single records that
+carry both) above `OPS_BOL_THRESHOLD` gallons (default 500). `app/vision.py` also
+recomputes the discrepancy when one image shows both figures.
 
 ---
 
@@ -201,18 +199,18 @@ All 22+ sites share a single bot, single database, and single dashboard. There i
 
 ## Summary
 
-| # | Limitation | Severity | Phase to Fix |
+| # | Limitation | Severity | Status |
 |---|---|---|---|
-| 1 | Python 3.14 compatibility | High | Use pyenv locally |
-| 2 | SQLite ephemeral on Cloud Run | High | Phase 3 (Firestore) |
-| 3 | No live message ingestion | High | Phase 2 |
-| 4 | No dashboard authentication | High | Phase 2/3 |
-| 5 | Webhook token not verified | High | Phase 2 |
-| 6 | No proactive messaging | Medium | Phase 4 |
-| 7 | Single region | Low | Phase 4 |
-| 8 | No monitoring | Medium | Phase 3 |
-| 9 | Basic classifier | Medium | Phase 3 |
-| 10 | Incomplete room mapping | Medium | Phase 3 |
-| 11 | No attachment processing | Medium | Phase 5 |
-| 12 | BOL/Veeder mismatch manual | Medium | Phase 5 |
-| 13 | No multi-tenancy | Low | Phase 3/4 |
+| 1 | Python 3.14 compatibility | High (dev only) | Workaround: stdlib-only deps; use pyenv 3.12 locally |
+| 2 | SQLite ephemeral on Cloud Run | — | ✅ Resolved — Firestore (`app/store.py`) is the live store |
+| 3 | No live message ingestion | — | ✅ Resolved — `/chat/events` webhook + `chat_live` |
+| 4 | No dashboard authentication | — | ✅ Resolved — `OPS_DASHBOARD_TOKEN` gate |
+| 5 | Webhook token not verified | High | In progress — `app/chat_auth.py` (gated) |
+| 6 | No proactive messaging | — | ✅ Resolved — `digests.JOBS` + Cloud Scheduler `/cron` |
+| 7 | Single region | Low | Open |
+| 8 | No monitoring | Low | Partial — `/healthz` + uptime check; no error-rate alerts |
+| 9 | Basic classifier | Medium | Open |
+| 10 | Room-to-site mapping | Low | Largely resolved — live `displayName` + `app/sites.py` |
+| 11 | Attachment processing | Low | Largely resolved — `app/vision.py`; broaden OCR (Phase 5) |
+| 12 | BOL/Veeder mismatch manual | — | ✅ Resolved — `app/reconcile.py` |
+| 13 | No multi-tenancy / roles | Low | Open — scoped roles planned (see ROLES.md) |
