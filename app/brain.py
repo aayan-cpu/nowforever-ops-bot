@@ -310,6 +310,34 @@ _ACTION_TOOLS = [
             "required": ["task_id", "assignee"],
         },
     },
+    {
+        "name": "message_user",
+        "description": "Proactively send a Google Chat DM to ANY person in the organization "
+                       "by name or email — even someone who has never messaged the bot. Use "
+                       "when an admin asks to message / tell / DM / notify / let someone know "
+                       "something (e.g. 'tell Abdul Moiz the delivery is here'). The name is "
+                       "resolved against the org directory; if it's ambiguous you'll get back "
+                       "candidates to confirm before resending.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "person": {"type": "string", "description": "Who to message — a name or email, e.g. 'Abdul Moiz' or 'moiz@khawarsons.com'"},
+                "message": {"type": "string", "description": "The message to send them"},
+            },
+            "required": ["person", "message"],
+        },
+    },
+    {
+        "name": "broadcast",
+        "description": "Post an announcement to the all-captains Chat space (reaches everyone "
+                       "at once). Use when an admin asks to announce / broadcast / tell everyone "
+                       "something. For a single person, use message_user instead.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"message": {"type": "string", "description": "The announcement text"}},
+            "required": ["message"],
+        },
+    },
 ]
 
 
@@ -432,6 +460,29 @@ def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> st
             r = reports.task_action(None, int(args["task_id"]), "assign", str(args.get("assignee", "")))
             return (f"Assigned task #{args['task_id']} to {args.get('assignee')}."
                     if r.get("ok") else f"Failed: {r.get('error')}")
+        if name == "message_user":
+            from app import directory
+            person = str(args.get("person", "")).strip()
+            text = str(args.get("message", "")).strip()
+            if not person or not text:
+                return "I need both who to message and what to say."
+            res = directory.message_person(person, text)
+            if res.get("ok"):
+                return f"Sent your message to {res.get('matched_name') or res.get('email')}."
+            if res.get("error") == "ambiguous":
+                opts = "; ".join(f"{c.get('name')} <{c.get('email')}>" for c in res.get("candidates", []))
+                return f"More than one person matches '{person}': {opts}. Who did you mean?"
+            if res.get("error") == "not_found":
+                return f"I couldn't find anyone matching '{person}' in the directory."
+            return f"Couldn't message {person}: {res.get('error')}"
+        if name == "broadcast":
+            from app import chat_media
+            text = str(args.get("message", "")).strip()
+            if not text:
+                return "What should I announce?"
+            space = os.getenv("OPS_ALL_CAPTAINS_SPACE", "spaces/AAAAhO6H0_Y")
+            ok = chat_media.post_to_space(space, f"📢 {text}")
+            return "Announcement posted to all captains." if ok else "Couldn't post the announcement."
     except Exception as e:
         return f"Tool error: {e}"
     return f"Unknown tool {name}"

@@ -102,6 +102,51 @@ def find_dm_space(user_id: str) -> str | None:
         return None
 
 
+def _match_person(query: str, users: list[dict]) -> tuple[dict | None, list[dict]]:
+    """Resolve a free-text name/email against a user list. Pure (no I/O) so it is
+    unit-testable. Returns (match, candidates): match is the single resolved user or
+    None; candidates is the shortlist (used to disambiguate when 0 or >1 match).
+
+    Order: exact email > exact full name > all-token substring match on name+email.
+    """
+    q = (query or "").strip().lower()
+    if not q:
+        return None, []
+    for u in users:
+        if (u.get("email") or "").lower() == q:
+            return u, [u]
+    exact = [u for u in users if (u.get("name") or "").lower() == q]
+    if len(exact) == 1:
+        return exact[0], exact
+    if exact:
+        return None, exact
+    toks = q.split()
+    subs = [u for u in users
+            if all(t in f"{(u.get('name') or '')} {(u.get('email') or '')}".lower() for t in toks)]
+    if len(subs) == 1:
+        return subs[0], subs
+    return None, subs  # 0 -> not found, >1 -> ambiguous
+
+
+def resolve_person(query: str) -> tuple[dict | None, list[dict]]:
+    """Look up a person by name/email across the org directory."""
+    return _match_person(query, list_users())
+
+
+def message_person(query: str, text: str, register_admin: bool = False) -> dict:
+    """Resolve a name/email to a directory user and proactively DM them. Returns a
+    result dict: ok+matched_name on success, or error in {ambiguous, not_found}."""
+    match, candidates = resolve_person(query)
+    if match:
+        res = dm_email(match["email"], text, register_admin=register_admin)
+        res["matched_name"] = match.get("name")
+        return res
+    if candidates:
+        return {"ok": False, "error": "ambiguous", "query": query,
+                "candidates": [{"name": c.get("name"), "email": c.get("email")} for c in candidates[:6]]}
+    return {"ok": False, "error": "not_found", "query": query}
+
+
 def dm_email(email: str, text: str, register_admin: bool = False) -> dict:
     """Proactively DM a user by email. Optionally register their DM space so
     Cloud Run digests can reach them later."""
