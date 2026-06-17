@@ -226,6 +226,20 @@ def analyze_images(msg: dict) -> dict:
     return out
 
 
+def _open_task_by_dedupe(dedupe_key: str) -> dict | None:
+    """Return an existing OPEN task with the same recurring-issue dedupe key, or
+    None. Used to collapse repeated reports of the same problem at one site."""
+    if not dedupe_key:
+        return None
+    try:
+        for t in store.find("tasks", "dedupe_key", dedupe_key, limit=10):
+            if (t.get("status") or "open") == "open":
+                return t
+    except Exception as e:
+        print(f"[dedupe] lookup {dedupe_key}: {e}", flush=True)
+    return None
+
+
 def ingest_live_event(event: dict, db_path: str = DB_PATH) -> dict:
     """Classify + store one Google Chat event in Firestore. Creates a task if action-worthy."""
     msg = extract_chat_event(event)
@@ -259,29 +273,45 @@ def ingest_live_event(event: dict, db_path: str = DB_PATH) -> dict:
         "extracted_gallons": json.dumps(c.extracted_gallons),
         "extracted_prices": json.dumps(c.extracted_prices),
         "assigned_hint": c.assigned_hint, "fingerprint": c.fingerprint,
+        "dedupe_key": c.dedupe_key,
         "confidence": c.confidence, "is_duplicate": False, "created_at": now,
         "vision_summary": vis["summary"], "vision": json.dumps(vis["results"]),
     })
     message_id = message_doc["id"]
 
     task_id = None
+    collapsed = False
     if is_task or priority == "high":
         title = (f"REVIEW: {vis['reason']}" if vis["needs_review"] else c.task_title)
         body = msg["message"][:4000]
         if vis["summary"]:
             body = (body + "\n" + vis["summary"]).strip()[:4000]
-        task_id = store.next_seq("tasks")
-        store.create("tasks", {
-            "id": task_id, "message_id": message_id, "room_name": msg["room_name"],
-            "sender": msg["sender"], "task_title": title, "task_text": body,
-            "category": (vis["category"] if vis["needs_review"] else category),
-            "priority": priority, "assigned_hint": c.assigned_hint,
-            "assignee": c.assigned_hint, "status": "open", "source_fingerprint": c.fingerprint,
-            "confidence": c.confidence, "created_at": now, "updated_at": now,
-        }, doc_id=str(task_id))
+        # Collapse near-duplicate recurring reports (e.g. repeated "need gas" at
+        # the same store) into the existing open task rather than spawning a new
+        # one. Only fires for recognizable recurring issues (c.dedupe_key set).
+        dup = _open_task_by_dedupe(c.dedupe_key)
+        if dup:
+            task_id = dup.get("id")
+            collapsed = True
+            try:
+                store.patch("tasks", task_id, {"updated_at": now})  # bump recency
+            except Exception as e:
+                print(f"[dedupe] patch {task_id}: {e}", flush=True)
+        else:
+            task_id = store.next_seq("tasks")
+            store.create("tasks", {
+                "id": task_id, "message_id": message_id, "room_name": msg["room_name"],
+                "sender": msg["sender"], "task_title": title, "task_text": body,
+                "category": (vis["category"] if vis["needs_review"] else category),
+                "priority": priority, "assigned_hint": c.assigned_hint,
+                "assignee": c.assigned_hint, "status": "open", "source_fingerprint": c.fingerprint,
+                "dedupe_key": c.dedupe_key,
+                "confidence": c.confidence, "created_at": now, "updated_at": now,
+            }, doc_id=str(task_id))
 
     # Instant high-priority alert: DM the owner the moment something urgent lands.
-    if (priority == "high" and task_id
+    # Skip when we collapsed into an existing task (not a new incident).
+    if (priority == "high" and task_id and not collapsed
             and os.getenv("OPS_INSTANT_ALERTS", "true").lower() in {"1", "true", "yes"}):
         try:
             chat_media.post_to_space(
