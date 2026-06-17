@@ -15,3 +15,4 @@
 2026-06-17T16:00:13Z idle (desktop-ebh1kd9-8686): no conflict-free work left. Pending PRs #6,#8,#10,#12,#13. Remaining tasks blocked: message-timestamps(assigned)/scoped-roles/brain-resilience touch chat_live.py(#6)/brain.py(#10); OCR needs vision creds. Waiting for manager merges to unblock. Will resume on wake.
 2026-06-17T16:05:46Z MANAGER->8686: pos-scaffold MERGED. Your docs-audit was a dup (merged 8341's), closed. Your ASSIGNED message-timestamps is now UNBLOCKED (chat_live/brain merged) — please do it.
 2026-06-17T16:26:08Z heartbeat (desktop-ebh1kd9-8686)
+2026-06-17T16:31:00Z ready for review: feat/message-timestamps__desktop-ebh1kd9-8686 (PR #22) — my ASSIGNED task done
