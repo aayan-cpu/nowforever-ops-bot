@@ -102,6 +102,38 @@ def find_dm_space(user_id: str) -> str | None:
         return None
 
 
+def create_dm_space(user_id: str) -> str | None:
+    """Create (or return) a DM space between the bot and an org user via
+    spaces.setup — lets the bot START a conversation without the user messaging
+    first (the 'cold DM' case). Only works for users in the org's Workspace;
+    returns None on failure (logged). Idempotent: if a DM already exists, Chat
+    returns it instead of erroring."""
+    tok = chat_media.get_chat_token()
+    if not tok:
+        return None
+    body = json.dumps({
+        "space": {"spaceType": "DIRECT_MESSAGE", "singleUserBotDm": True},
+        "memberships": [{"member": {"name": f"users/{user_id}", "type": "HUMAN"}}],
+    }).encode()
+    req = urllib.request.Request(
+        "https://chat.googleapis.com/v1/spaces:setup", data=body, method="POST",
+        headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"})
+    try:
+        return json.loads(urllib.request.urlopen(req, context=_ctx, timeout=15).read()).get("name")
+    except urllib.error.HTTPError as e:
+        print(f"[directory] setupDM {user_id}: {e.code} {e.read().decode()[:200]}", flush=True)
+        return None
+    except Exception as e:
+        print(f"[directory] setupDM {user_id}: {e}", flush=True)
+        return None
+
+
+def ensure_dm_space(user_id: str) -> str | None:
+    """The bot's DM space with a user — existing if there is one, otherwise create
+    one (cold DM). This is what lets the bot reach anyone in the org proactively."""
+    return find_dm_space(user_id) or create_dm_space(user_id)
+
+
 def _match_person(query: str, users: list[dict]) -> tuple[dict | None, list[dict]]:
     """Resolve a free-text name/email against a user list. Pure (no I/O) so it is
     unit-testable. Returns (match, candidates): match is the single resolved user or
@@ -153,9 +185,10 @@ def dm_email(email: str, text: str, register_admin: bool = False) -> dict:
     uid = get_user_id(email)
     if not uid:
         return {"ok": False, "email": email, "error": "user not found in directory"}
-    space = find_dm_space(uid)
+    space = ensure_dm_space(uid)  # find existing, else create one (cold DM)
     if not space:
-        return {"ok": False, "email": email, "error": "no DM space (user may need to allow the app)"}
+        return {"ok": False, "email": email,
+                "error": "couldn't open a DM (user not in org Workspace, or app not available to them)"}
     ok = chat_media.post_to_space(space, text)
     if ok and register_admin:
         try:
