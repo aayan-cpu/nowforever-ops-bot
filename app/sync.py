@@ -176,6 +176,36 @@ def ocr_pass(batch: int = 6) -> dict:
     return result
 
 
+def clear_day_report_alerts() -> dict:
+    """One-time: clear day-report REVIEW/flag alerts (the noisy 'needs review' /
+    flagged-field items) — closing the tasks and pulling their messages out of the
+    alerts list. Does NOT touch real issues (pumps/gas/etc.) or the separate
+    'store didn't send a report at all' detection. Per owner: only a totally-missing
+    report should alert, not field-level review flags."""
+    review_titles = ("Attachment/report needs review",)
+    closed = downgraded = 0
+    for t in store.list_all("tasks"):
+        if (t.get("status") or "open") != "open":
+            continue
+        title = (t.get("task_title") or "")
+        if title in review_titles or title.startswith("REVIEW:"):
+            try:
+                store.patch("tasks", t["id"], {"status": "closed"})
+                closed += 1
+            except Exception:
+                pass
+            mid = t.get("message_id")
+            if mid:
+                try:
+                    store.patch("messages", mid,
+                                {"priority": "normal", "is_task": False, "is_duplicate": True})
+                    downgraded += 1
+                except Exception:
+                    pass
+    print(f"[clear-dr] closed {closed} review tasks, downgraded {downgraded} msgs", flush=True)
+    return {"review_tasks_closed": closed, "messages_downgraded": downgraded}
+
+
 def purge_bot_echo() -> dict:
     """Downgrade the bot's OWN posts (broadcasts/digests/alerts) that the sync
     re-ingested before the BOT filter existed, so they stop showing as alerts/tasks.

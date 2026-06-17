@@ -302,11 +302,18 @@ def purge_bot_echo() -> dict:
     return {"ok": True, "kind": "purge_bot_echo", **sync.purge_bot_echo()}
 
 
+def clear_dr_alerts() -> dict:
+    """Clear day-report review/flag alerts (one-time)."""
+    from app import sync
+    return {"ok": True, "kind": "clear_dr_alerts", **sync.clear_day_report_alerts()}
+
+
 JOBS = {
     "sync": sync_messages,
     "ocr-pass": ocr_pass,
     "remap-rooms": remap_rooms,
     "purge-bot-echo": purge_bot_echo,
+    "clear-dr-alerts": clear_dr_alerts,
     "morning-digest": morning_digest,
     "urgent-reminder": urgent_reminder,
     "missing-reports": missing_reports,
