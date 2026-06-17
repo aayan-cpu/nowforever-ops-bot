@@ -314,6 +314,17 @@ def backfill_dms() -> dict:
     return {"ok": True, "kind": "backfill_dms", **sync.backfill_dm_flag()}
 
 
+def gas_report_reminder() -> dict:
+    """Daily reminder broadcast to every store chat to send the gas/day report.
+    Message is editable via OPS_GAS_REPORT_MSG."""
+    from app import brain, chat_media
+    text = os.getenv("OPS_GAS_REPORT_MSG",
+                     "📋 Daily reminder: please send today's gas report. Thank you!")
+    rooms = brain.store_chat_spaces()
+    sent = sum(1 for sp, _n in rooms if chat_media.post_to_space(sp, text))
+    return {"ok": sent > 0, "kind": "gas_report_reminder", "sent": sent, "rooms": len(rooms)}
+
+
 JOBS = {
     "sync": sync_messages,
     "ocr-pass": ocr_pass,
@@ -321,6 +332,7 @@ JOBS = {
     "purge-bot-echo": purge_bot_echo,
     "clear-dr-alerts": clear_dr_alerts,
     "backfill-dms": backfill_dms,
+    "gas-report-reminder": gas_report_reminder,
     "morning-digest": morning_digest,
     "urgent-reminder": urgent_reminder,
     "missing-reports": missing_reports,

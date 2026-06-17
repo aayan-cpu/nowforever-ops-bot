@@ -38,6 +38,30 @@ def fmt_ts(ts: str) -> str:
         return str(ts)[:19]
 
 
+def _local_today() -> str:
+    """Today's date (YYYY-MM-DD) in the local timezone — not UTC, so an evening run
+    (past midnight UTC) still uses the correct local day."""
+    now = datetime.now(timezone.utc)
+    if _LOCAL_TZ:
+        now = now.astimezone(_LOCAL_TZ)
+    return now.date().isoformat()
+
+
+def _local_day(ts: str) -> str:
+    """The local-timezone date (YYYY-MM-DD) of a stored UTC timestamp."""
+    if not ts:
+        return ""
+    try:
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        if _LOCAL_TZ:
+            dt = dt.astimezone(_LOCAL_TZ)
+        return dt.date().isoformat()
+    except Exception:
+        return str(ts)[:10]
+
+
 _PRI_RANK = {"high": 0, "medium": 1}
 
 
@@ -169,7 +193,7 @@ def report_status(messages: list[dict], as_of: str, overdue_days: int = OVERDUE_
         site = sites.canonical_name(rn)
         seen.add(site)
         if _is_report(m):
-            day = (m.get("created_at") or m.get("timestamp_raw") or "")[:10]
+            day = _local_day(m.get("sent_at") or m.get("created_at") or m.get("timestamp_raw"))
             if day and day > last_report.get(site, ""):
                 last_report[site] = day
 
@@ -198,7 +222,7 @@ def _days_between(start_day: str, end_day: str) -> int | None:
 def missing_daily_reports(as_of: str | None = None, overdue_days: int = OVERDUE_DAYS) -> dict:
     """Live entry point: report_status over all stored messages for ``as_of``
     (defaults to today, UTC)."""
-    as_of = as_of or datetime.now(timezone.utc).date().isoformat()
+    as_of = as_of or _local_today()
     return report_status(store.list_all("messages"), as_of, overdue_days)
 
 
