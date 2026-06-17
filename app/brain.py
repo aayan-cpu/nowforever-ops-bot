@@ -248,6 +248,18 @@ _READ_TOOLS = [
         },
     },
     {
+        "name": "get_cash_reconcile",
+        "description": "Reconcile day-report CASH against bank DEPOSITS — flags where the "
+                       "deposit came in SHORT of (or over) the cash a store reported, matched "
+                       "by store and date. Use for cash-shortage, missing/late-deposit, or "
+                       "loss-prevention questions. Optionally filter by store.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"store": {"type": "string", "description": "Optional store filter"}},
+            "required": [],
+        },
+    },
+    {
         "name": "get_reports",
         "description": "Get extracted daily/closing report figures — fuel gallons sold, "
                        "inside (store) sales, fuel sales, total sales — read from report "
@@ -398,6 +410,27 @@ def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> st
                 if r.get("discrepancy_gallons"): p.append(f"DIFF {r['discrepancy_gallons']} gal")
                 out.append(" · ".join(p))
             return "\n".join(out)
+        if name == "get_cash_reconcile":
+            from app import cash_reconcile
+            rows = cash_reconcile.discrepancies(only_flagged=False)
+            sq = str(args.get("store", "")).lower().strip()
+            if sq:
+                rows = [r for r in rows if sq in (r.get("room_name") or "").lower()]
+            if not rows:
+                return "No day-report cash vs deposit data to reconcile yet."
+            flagged = [r for r in rows if r.get("flagged")]
+            shown = (flagged or rows)[:30]
+            out = []
+            for r in shown:
+                tag = "⚠️ " if r.get("flagged") else ""
+                p = [f"{tag}{r.get('room_name')}"]
+                if r.get("report_date"):
+                    p.append(str(r["report_date"]))
+                p.append(r.get("reason", ""))
+                out.append(" · ".join(p))
+            header = (f"{len(flagged)} flagged cash/deposit mismatch(es):\n" if flagged
+                      else "No cash/deposit mismatches over threshold. Recent:\n")
+            return header + "\n".join(out)
         if name == "get_reports":
             rows = store.list_all("day_reports")
             store_q = str(args.get("store", "")).lower().strip()

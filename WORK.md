@@ -42,6 +42,7 @@
 
 ## Done
 
+- [x] (DONE) **Cash-vs-deposit reconciliation** — day-report cash_amount (OCR) matched to bank deposits by store+date, flags shortfalls over threshold; new app/cash_reconcile.py + get_cash_reconcile brain tool + deposit capture + 13 tests. [pc-mgr]
 - [x] (DONE) **Veeder-Root reading OCR** [worker 8341, merged by pc-mgr]
 - [x] (DONE) **Message timestamps in ingestion** [worker 8686, merged by pc-mgr]
 - [x] (DONE) **Multi-turn conversation memory** [worker 3575, merged by pc-mgr]

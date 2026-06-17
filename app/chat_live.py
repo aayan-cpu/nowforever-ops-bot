@@ -203,6 +203,7 @@ def analyze_images(msg: dict) -> dict:
                         "shift": res.get("shift"), "total_sales": res.get("total_sales"),
                         "inside_sales": res.get("inside_sales"), "fuel_sales": res.get("fuel_sales"),
                         "fuel_gallons_sold": res.get("fuel_gallons_sold"),
+                        "cash_amount": res.get("cash_amount"),
                         "summary": res.get("summary"), "data_id": msg.get("data_id"),
                     })
                 except Exception as e:
@@ -282,6 +283,20 @@ def ingest_live_event(event: dict, db_path: str = DB_PATH) -> dict:
         "vision_summary": vis["summary"], "vision": json.dumps(vis["results"]),
     })
     message_id = message_doc["id"]
+
+    # Capture bank deposits so cash_reconcile can match report cash vs deposit.
+    if "deposit_cash_bank" in c.categories:
+        try:
+            from app import cash_reconcile
+            dep = cash_reconcile.parse_deposit(msg["message"])
+            if dep:
+                store.create("deposits", {
+                    "room_name": msg["room_name"], "amount": dep["amount"],
+                    "deposit_date": dep.get("deposit_date") or (msg.get("sent_at") or "")[:10],
+                    "sender": msg["sender"], "data_id": msg["data_id"], "created_at": now,
+                })
+        except Exception as e:
+            print(f"[deposit] store: {e}", flush=True)
 
     task_id = None
     collapsed = False
