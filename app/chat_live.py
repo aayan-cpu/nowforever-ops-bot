@@ -340,10 +340,50 @@ def should_reply(event: dict, c_priority: str | None = None) -> bool:
     return ("nowforever" in text or "ops bot" in text or "@now" in text)
 
 
+# Bare read-only command words → handler key. Single source of truth so the
+# router can't silently miss a synonym (the "reports"/"report" -> 'Got it.' bug).
+# Each set is matched against the WHOLE normalized message only.
+SUMMARY_WORDS = {"summary", "dashboard", "status", "report", "reports",
+                 "daily report", "what happened", "what happened today"}
+ALERT_WORDS = {"alerts", "alert", "urgent", "urgents", "high priority", "high"}
+TASK_WORDS = {"tasks", "open tasks", "task list", "list tasks", "open items",
+              "todo", "todos", "to do"}
+HELP_WORDS = {"help", "commands", "command", "?", "menu", "options"}
+
+# Everything the bot understands as a bare keyword — used to guarantee a
+# recognized command never falls through to a blank "Got it." ack.
+COMMAND_WORDS = SUMMARY_WORDS | ALERT_WORDS | TASK_WORDS | HELP_WORDS
+
+HELP_TEXT = (
+    "🤖 Now & Forever Ops Bot — try:\n"
+    "• summary / report — today's overview\n"
+    "• alerts — high-priority items\n"
+    "• tasks — open tasks\n"
+    "• show <room name> — a site's recent activity\n"
+    "• close task #<id> / assign task #<id> to <name> (admins)\n"
+    "Or just ask me a question in plain English."
+)
+
+
+def is_command_word(text: str) -> bool:
+    """True if the (mention-stripped) message is exactly a known bare command."""
+    return _command_key(text) in COMMAND_WORDS
+
+
+def _command_key(text: str) -> str:
+    norm = re.sub(r"(?i)@?\s*now\s*(and|&)?\s*forever(\s*ops\s*bot)?|@?\s*ops\s*bot", "", text or "").strip()
+    return norm.lower().strip(" :,.!?")
+
+
 def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> str | None:
     """Return a reply for an EXACT command, or None for anything conversational
     (so the caller routes it to the AI brain). Commands must be the whole message
-    — a sentence that merely contains 'task'/'summary' is not a command."""
+    — a sentence that merely contains 'task'/'summary' is not a command.
+
+    For a recognized read-only keyword from a non-admin we normally return None so
+    the AI can answer naturally — but only when the brain is actually available.
+    If the brain is down we answer the keyword directly rather than let it decay
+    into a blank "Got it." ack (the bug these command words used to hit)."""
     text = msg["message"] or ""
     # Strip a leading bot mention: "NowForever Ops Bot tasks" -> "tasks".
     norm = re.sub(r"(?i)@?\s*now\s*(and|&)?\s*forever(\s*ops\s*bot)?|@?\s*ops\s*bot", "", text).strip()
@@ -367,10 +407,16 @@ def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> st
         res = task_action(db_path, tid, "assign", assignee)
         return f"Assigned #{tid} to {assignee}." if res.get("ok") else f"Could not assign #{tid}: {res.get('error')}"
 
-    # Quick read-only commands — only when the message IS the command.
-    if low in {"summary", "dashboard", "what happened", "what happened today", "status"}:
-        if not admin:
-            return None  # let the AI answer non-admins instead of refusing
+    # A bare "help"/"commands" always gets the menu — for everyone.
+    if low in HELP_WORDS:
+        return HELP_TEXT
+
+    # Read-only commands. For a non-admin, defer to the AI brain when it's up;
+    # when it's down, still answer (read-only, harmless) so the recognized word
+    # never produces a blank ack.
+    if low in SUMMARY_WORDS:
+        if not admin and brain.enabled():
+            return None
         d = dashboard(db_path)
         open_count = next((x["count"] for x in d["tasks"] if x["status"] == "open"), 0)
         high_count = next((x["count"] for x in d["priorities"] if x["priority"] == "high"), 0)
@@ -380,8 +426,8 @@ def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> st
             lines.append(f"• {r['room_name']}: {r['tasks']} tasks, {r['high']} high")
         return "\n".join(lines)
 
-    if low in {"alerts", "alert", "urgent", "urgents", "high priority"}:
-        if not admin:
+    if low in ALERT_WORDS:
+        if not admin and brain.enabled():
             return None
         alerts = high_priority(db_path, 8)
         if not alerts:
@@ -389,8 +435,8 @@ def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> st
         return "\n".join(["🚨 High Priority Alerts"] +
                          [f"• [{a['room_name']}] {(a.get('message') or '')[:160]}" for a in alerts])
 
-    if low in {"tasks", "open tasks", "task list", "list tasks", "open items"}:
-        if not admin:
+    if low in TASK_WORDS:
+        if not admin and brain.enabled():
             return None
         tasks = open_tasks(db_path, limit=10)
         if not tasks:
