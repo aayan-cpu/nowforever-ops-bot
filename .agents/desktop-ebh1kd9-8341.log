@@ -9,3 +9,5 @@
 2026-06-17T15:52:36Z heartbeat (desktop-ebh1kd9-8341)
 2026-06-17T15:56:22Z ready for review: feat/docs-audit__desktop-ebh1kd9-8341 (removed nonexistent app/room_mappings.py refs, fixed SQLite-as-live -> Firestore in LIMITATIONS/DEPLOYMENT/ROOM_MAPPINGS; docs-only)
 2026-06-17T15:56:22Z heartbeat (desktop-ebh1kd9-8341)
+2026-06-17T15:59:16Z ready for review: feat/site-aware-classifier__desktop-ebh1kd9-8341 (classifier resolves canonical site via app.sites, attribution-only, 13 tests, suite 178 green)
+2026-06-17T15:59:16Z heartbeat (desktop-ebh1kd9-8341)
