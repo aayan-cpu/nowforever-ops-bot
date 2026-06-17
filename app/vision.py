@@ -26,6 +26,9 @@ MODEL = os.getenv("OPS_VISION_MODEL", "claude-opus-4-8")
 ENDPOINT = "https://api.anthropic.com/v1/messages"
 # Flag a BOL vs Veeder-Root delivery discrepancy above this many gallons.
 DISCREPANCY_THRESHOLD = int(os.getenv("OPS_BOL_THRESHOLD", "500"))
+# Flag a tank whose water level (inches) reaches this — water in fuel is an
+# urgent ops issue (contamination / phase separation).
+WATER_ALERT_INCHES = float(os.getenv("OPS_TANK_WATER_INCHES", "2"))
 
 _ctx = ssl.create_default_context()
 
@@ -67,13 +70,30 @@ _SCHEMA = {
                 "additionalProperties": False,
             },
         },
+        # Per-tank breakdown for a Veeder-Root / tank-gauge reading (the OCR target).
+        "tanks": {
+            "type": "array",
+            "description": "Per-tank rows on a Veeder-Root / ATG tank-gauge reading.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "tank": {"type": ["string", "null"], "description": "Tank label/number as printed (T1, Tank 2, ...)."},
+                    "product": {"type": ["string", "null"], "description": "Fuel grade in the tank (Regular/Super/Diesel/...)."},
+                    "volume_gallons": {"type": ["number", "null"], "description": "Current product VOLUME in gallons, else null."},
+                    "ullage_gallons": {"type": ["number", "null"], "description": "Ullage (empty space) gallons, else null."},
+                    "water_inches": {"type": ["number", "null"], "description": "Water level in inches, else null."},
+                },
+                "required": ["tank", "product", "volume_gallons", "ullage_gallons", "water_inches"],
+                "additionalProperties": False,
+            },
+        },
         "site_hint": {"type": ["string", "null"], "description": "Site/store name or number if visible."},
         "model_flagged_issue": {"type": "boolean", "description": "Does the image show a problem worth a human review (missing/blank fields, math that doesn't add up, damage, error, outage, anomaly)?"},
     },
     "required": ["doc_type", "summary", "bol_gallons", "veeder_gallons",
                  "report_date", "shift", "total_sales", "inside_sales",
                  "fuel_gallons_sold", "fuel_sales",
-                 "amounts", "gallons", "prices", "products", "site_hint", "model_flagged_issue"],
+                 "amounts", "gallons", "prices", "products", "tanks", "site_hint", "model_flagged_issue"],
     "additionalProperties": False,
 }
 
@@ -84,7 +104,10 @@ _PROMPT = (
     "- Fuel-delivery receipt / BOL line items (doc_type='fuel_receipt' or 'bol'): "
     "for EACH fuel grade, add a `products` entry with the grade name, its gallons, "
     "and per-gallon price if shown (e.g. Regular 5,000 gal, Super 1,200 gal, Diesel 2,000 gal).\n"
-    "- Veeder-Root tank monitor reading: read the gallons into veeder_gallons.\n"
+    "- Veeder-Root / ATG tank-gauge reading (doc_type='veeder_root'): for EACH "
+    "tank row add a `tanks` entry with its label, product, current VOLUME in "
+    "gallons, ullage, and water level in inches. Put the total product volume "
+    "across tanks into veeder_gallons.\n"
     "- Daily / shift / closing report (doc_type='day_report'): read report_date, shift, "
     "total_sales, inside_sales (store/merchandise sales $), fuel_sales ($), and "
     "fuel_gallons_sold (total gallons dispensed). Capture key dollar amounts; set "
@@ -277,9 +300,76 @@ def extract_receipt(data: dict) -> dict:
     return data
 
 
+def parse_tanks(raw_tanks) -> list[dict]:
+    """Normalize the model's `tanks` rows: canonical product, numeric volume /
+    ullage / water. Drops rows with neither a tank label nor a volume."""
+    out: list[dict] = []
+    for item in raw_tanks or []:
+        if not isinstance(item, dict):
+            continue
+        tank = (str(item.get("tank")).strip() if item.get("tank") else None)
+        product = normalize_product(item.get("product"))
+        volume = _to_number(item.get("volume_gallons"))
+        if not tank and volume is None:
+            continue
+        out.append({
+            "tank": tank,
+            "product": product,
+            "volume_gallons": volume,
+            "ullage_gallons": _to_number(item.get("ullage_gallons")),
+            "water_inches": _to_number(item.get("water_inches")),
+        })
+    return out
+
+
+def veeder_totals(tanks: list[dict], water_alert_inches: float | None = None) -> dict:
+    """Aggregate parsed tanks: total product volume, per-grade volume, and the
+    deepest water reading + whether it crosses the alert threshold."""
+    thr = WATER_ALERT_INCHES if water_alert_inches is None else water_alert_inches
+    by_product: dict[str, float] = {}
+    total = 0.0
+    any_volume = False
+    max_water = None
+    for t in tanks:
+        v = t.get("volume_gallons")
+        if v is not None:
+            any_volume = True
+            total += v
+            if t.get("product"):
+                by_product[t["product"]] = round(by_product.get(t["product"], 0.0) + v, 2)
+        w = t.get("water_inches")
+        if w is not None and (max_water is None or w > max_water):
+            max_water = w
+    return {"total_gallons": round(total, 2) if any_volume else None,
+            "by_product": by_product,
+            "max_water_inches": max_water,
+            "high_water": max_water is not None and max_water >= thr}
+
+
+def extract_veeder(data: dict) -> dict:
+    """Attach normalized tanks + totals to a vision result. For a veeder_root
+    doc, backfill veeder_gallons from the summed tank volumes when the model
+    didn't give a single total, and flag high water for review."""
+    tanks = parse_tanks(data.get("tanks"))
+    data["tanks"] = tanks
+    totals = veeder_totals(tanks)
+    data["veeder_total_gallons"] = totals["total_gallons"]
+    data["tanks_by_grade"] = totals["by_product"]
+    data["max_water_inches"] = totals["max_water_inches"]
+    data["high_water"] = totals["high_water"]
+    if (data.get("doc_type") == "veeder_root"
+            and not isinstance(data.get("veeder_gallons"), (int, float))
+            and totals["total_gallons"] is not None):
+        data["veeder_gallons"] = totals["total_gallons"]
+    if totals["high_water"]:
+        data["model_flagged_issue"] = True
+    return data
+
+
 def _reconcile(data: dict) -> dict:
     """Recompute the BOL vs Veeder discrepancy in Python (don't trust model math)."""
     extract_receipt(data)
+    extract_veeder(data)
     bol = data.get("bol_gallons")
     veeder = data.get("veeder_gallons")
     discrepancy = None
@@ -294,6 +384,11 @@ def _reconcile(data: dict) -> dict:
         if discrepancy > DISCREPANCY_THRESHOLD:
             needs_review = True
             reason = f"BOL {bol} vs Veeder {veeder} differ by {discrepancy} gal (> {DISCREPANCY_THRESHOLD})"
+    # High water in a tank is its own urgent flag (unless a discrepancy already
+    # gave a more specific reason).
+    if data.get("high_water") and (not reason or reason == "image flagged a problem"):
+        needs_review = True
+        reason = f"water in tank: {data.get('max_water_inches')} in (>= {WATER_ALERT_INCHES} in)"
     data["discrepancy_gallons"] = discrepancy
     data["needs_review"] = needs_review
     data["review_reason"] = reason
