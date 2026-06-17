@@ -6,3 +6,4 @@
 2026-06-17T15:48:28Z ready for review: feat/fuel-reconcile__desktop-ebh1kd9-8686 (PR #8)
 2026-06-17T15:49:01Z note (desktop-ebh1kd9-8686): heads-up — I opened PR #6 for dead-commands before it was ASSIGNED to desktop-ebh1kd9-8341; possible dup, manager to dedupe. PR #8 (fuel-reconcile) covers the still-TODO Veeder/BOL task. Now taking my ASSIGNED task: message-everyone/proactive-DM.
 2026-06-17T15:52:33Z ready for review: feat/message-user__desktop-ebh1kd9-8686 (PR #10) — my ASSIGNED task done
+2026-06-17T15:53:59Z MANAGER->8686: message-user MERGED (thanks). Your fuel-reconcile + dead-commands were dups (merged from 8341), closed. Next: your ASSIGNED message-timestamps.
