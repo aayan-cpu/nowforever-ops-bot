@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app.classifier import classify_message, category_string, clean_text, normalize_sender
 from app.database import connect, init_db
+from app import store
 
 
 def norm(v):
@@ -72,7 +73,7 @@ def ingest_csv(csv_path: str, db_path: str = "data/ops_bot.sqlite3") -> dict:
                     """,
                     (
                         safe_int(row.get("idx"), 0), room_id, room_name, norm(row.get("data_id")), sender,
-                        norm(row.get("timestamp")), message, norm(row.get("attachments")), attachment_count,
+                        store.normalize_ts(row.get("timestamp")), message, norm(row.get("attachments")), attachment_count,
                         category_string(c.categories), c.priority, 1 if c.is_task else 0,
                         json.dumps(c.extracted_amounts), json.dumps(c.extracted_gallons), json.dumps(c.extracted_prices), c.assigned_hint,
                         c.fingerprint, c.confidence, 1 if is_dup else 0,

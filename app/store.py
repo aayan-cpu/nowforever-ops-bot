@@ -19,11 +19,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import ssl
 import time
 import urllib.request
 import urllib.parse
 import urllib.error
+from datetime import datetime, timezone
 
 PROJECT = os.getenv("OPS_GCP_PROJECT", "nfchatbot-498419")
 DB = os.getenv("OPS_FIRESTORE_DB", "(default)")
@@ -79,6 +81,61 @@ def _token() -> str:
     got = _metadata_token() or _sa_token()
     _token_cache["token"], _token_cache["exp"] = got
     return got[0]
+
+
+# ---------------------------------------------------------- timestamps
+# A message's SEND time (when the captain posted it) is distinct from its INGEST
+# time (when we recorded it). Google Chat gives RFC3339 createTime; the Vault
+# export gives assorted string formats; some sources give epoch. normalize_ts()
+# collapses all of these to a single ISO-8601 UTC string so downstream code can
+# sort, compare, and flag late/missing-by-cutoff reports consistently.
+_ISO_FALLBACK_FORMATS = (
+    "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y/%m/%d %H:%M:%S",
+    "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M", "%Y-%m-%d",
+)
+
+
+def normalize_ts(raw, now: datetime | None = None) -> str:
+    """Best-effort convert a chat/Vault/epoch timestamp to an ISO-8601 UTC string.
+
+    Falls back to `now` (current UTC) when `raw` is blank or unparseable, so every
+    record always carries a sortable send-time. Pure — no I/O."""
+    now = now or datetime.now(timezone.utc)
+    s = ("" if raw is None else str(raw)).strip()
+    if not s:
+        return now.isoformat()
+    # epoch seconds (10 digits) or milliseconds (13 digits)
+    if re.fullmatch(r"\d{10}", s):
+        return datetime.fromtimestamp(int(s), timezone.utc).isoformat()
+    if re.fullmatch(r"\d{13}", s):
+        return datetime.fromtimestamp(int(s) / 1000, timezone.utc).isoformat()
+    # ISO-8601 / RFC3339 (normalize trailing Z; fromisoformat handles fractions)
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).isoformat()
+    except ValueError:
+        pass
+    for fmt in _ISO_FALLBACK_FORMATS:
+        try:
+            return datetime.strptime(s, fmt).replace(tzinfo=timezone.utc).isoformat()
+        except ValueError:
+            continue
+    return now.isoformat()
+
+
+def age_minutes(sent_at, now: datetime | None = None) -> float | None:
+    """Minutes between a normalized send-time and `now`, or None if unparseable.
+    Use for 'posted N minutes ago' / late-by-cutoff reasoning."""
+    now = now or datetime.now(timezone.utc)
+    try:
+        dt = datetime.fromisoformat(str(sent_at).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return (now - dt).total_seconds() / 60
 
 
 # ------------------------------------------------------- value (de)serialize
