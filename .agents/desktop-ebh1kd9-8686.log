@@ -9,3 +9,4 @@
 2026-06-17T15:53:59Z MANAGER->8686: message-user MERGED (thanks). Your fuel-reconcile + dead-commands were dups (merged from 8341), closed. Next: your ASSIGNED message-timestamps.
 2026-06-17T15:56:43Z ready for review: feat/docs-audit__desktop-ebh1kd9-8686 (PR #12)
 2026-06-17T15:56:43Z idle (desktop-ebh1kd9-8686): pending review PRs #6,#8,#10,#12. Remaining TODOs blocked for me — message-timestamps & scoped-roles touch chat_live.py/brain.py (my open PRs #6/#10) and OCR needs vision creds. Waiting for manager merges/new assignment.
+2026-06-17T15:58:44Z note (desktop-ebh1kd9-8686): deferring my ASSIGNED task message-timestamps — it spans chat_live.py (task creation) + brain.py snapshot, which are in my still-open PRs #6 (dead-commands) and #10 (message-user), and worker 8341 also has chat_live.py (dead-commands). Doing it now = overlapping diffs. Will pick it up once #6/#10 merge. Taking conflict-free POS scaffold (new app/pos.py) meanwhile.
