@@ -69,9 +69,14 @@ PERSONA = (
     "saved preferences, infer what they really want, connect related issues into the bigger "
     "picture (e.g. 'the outage is what's blocking the pumps and SSCS'), and suggest the next "
     "step. Prioritize; don't just enumerate.\n"
-    "- Answer from the OPS DATA and tool results. If you don't have something, say so briefly "
-    "and offer to look it up (you have a tool to pull any store). Never invent numbers, "
-    "gallons, or store names.\n"
+    "- GROUNDING IS ABSOLUTE. State ONLY facts literally present in OPS DATA or returned by a "
+    "tool. Never invent or guess a task number, store name, quantity, gallon figure, time, or "
+    "quote. Do not infer that a problem exists at a store unless it is actually in the data.\n"
+    "- For ANY 'which store / busiest / overview / how many' question, answer from the PER-STORE "
+    "and BOARD TOTALS section (those are complete). NEVER generalize the whole board from the "
+    "SAMPLE task list — it is only a slice. If two answers would differ, the COMPLETE counts win.\n"
+    "- If you don't have something, say so plainly and offer to pull it with a tool (you can "
+    "look up any store). 'I don't see that in the data' is always better than a guess.\n"
     "- You can act: close or assign tasks directly when asked — just do it and confirm "
     "naturally."
 )
@@ -82,11 +87,38 @@ def enabled() -> bool:
 
 
 def _snapshot(room_name: str | None) -> str:
-    """Compact live ops context for the model. Kept small to limit tokens."""
+    """Compact live ops context for the model.
+
+    Leads with the COMPLETE per-store aggregate (same source as the /summary
+    command) so the model answers "which store / overview / how many" from real
+    totals — never from the small task sample. Feeding only a 20-of-240 task
+    sample is what made the bot name a different "dominant store" every call and
+    invent counts; the aggregate fixes that at the root.
+    """
     lines: list[str] = []
+    # 1) COMPLETE board aggregate — the source of truth for any overview question.
     try:
-        tasks = reports.open_tasks(limit=20)
-        lines.append(f"OPEN TASKS ({len(tasks)} shown):")
+        d = reports.dashboard()
+        tcounts = {x["status"]: x["count"] for x in d.get("tasks", [])}
+        open_total = tcounts.get("open", 0)
+        high_total = next((x["count"] for x in d.get("priorities", [])
+                           if x["priority"] == "high"), 0)
+        lines.append(f"BOARD TOTALS (complete — all stores): {open_total} open tasks, "
+                     f"{high_total} high-priority messages, "
+                     f"{d.get('totals', {}).get('messages', 0)} messages total.")
+        lines.append("PER-STORE counts (COMPLETE, over ALL data — use THIS for any "
+                     "'which store / busiest / how many' question, never the SAMPLE below):")
+        for r in d.get("top_rooms", []):
+            lines.append(f"• {r['room_name']}: {r['tasks']} task-msgs, "
+                         f"{r['high']} high-priority, {r['messages']} msgs")
+    except Exception:
+        lines.append("(board totals unavailable)")
+    # 2) Deterministic SAMPLE of top-priority tasks — for detail only, NOT for counting.
+    try:
+        tasks = reports.open_tasks(limit=25)
+        lines.append(f"\nSAMPLE — top {len(tasks)} highest-priority open tasks (a SAMPLE only; "
+                     f"do NOT derive per-store totals or 'dominant store' from this list — "
+                     f"use PER-STORE above):")
         for t in tasks:
             lines.append(f"• #{t.get('id')} [{t.get('room_name')}] "
                          f"{(t.get('task_title') or t.get('task_text') or '')[:120]} "
