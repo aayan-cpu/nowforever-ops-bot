@@ -31,6 +31,11 @@
 - [ ] (TODO) **Scoped roles** (docs/ROLES.md "Planned") — `roles` map (email→role) with permission + store scope below admin. mainly: new app/roles.py + brain/command handlers  branch: —
 - [ ] (TODO) **Audit remaining docs for stale module refs** — README is fixed; sweep `docs/*.md` for references to nonexistent modules / outdated SQLite-as-live claims. mainly: docs/  branch: —
 
+- [ ] (TODO) **CI: run the test suite on PRs** — add `.github/workflows/tests.yml` running `py -m unittest discover -s tests` on push/PR (great now that there are 141 tests). mainly: .github/workflows/ (new)  branch: —
+- [ ] (TODO) **Site-aware classifier** (Phase 3) — improve `app/classifier.py` to use room/site context for better category + priority accuracy. mainly: app/classifier.py  branch: —
+- [ ] (TODO) **Brain API resilience** — add retry/backoff + timeout handling for the Claude REST call in `app/brain.py` so a transient API error doesn't drop a user's reply. mainly: app/brain.py  branch: —
+- [ ] (TODO) **POS integration scaffold** (Phase 5) — stub `app/pos.py` defining the interface for pulling sales/inventory, with a fake adapter + tests. mainly: app/pos.py (new)  branch: —
+
 ## In progress
 
 <!-- claimed rows move here -->
