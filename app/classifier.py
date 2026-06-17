@@ -58,7 +58,9 @@ STILL_URGENT_RE = re.compile(r"\b(still not|still down|urgent|asap|emergency)\b"
 HIGH_PRIORITY_PATTERNS = [
     r"\basap\b", r"\burgent\b", r"\bneed gas\b", r"\bwe need gas\b", r"\bturned off\b.*\b(regular|super|gas|fuel)",
     r"\bregular\s+n\s+super\b", r"\belectrician\b", r"\bstill not working\b", r"\bnot working\b", r"\bpower\b.*\b(stopped|out|burned|not)", r"\bnot having power\b",
-    r"\bswitch\s*board\b.*\bburn", r"\bless\b.*\bgallon", r"\bshort\b.*\bgallon", r"\b2500\b", r"\bsewage\b",
+    r"\bswitch\s*board\b.*\bburn", r"\bless\b.*\bgallon", r"\bshort\b.*\bgallon", r"\bsewage\b",
+    # Cash/drawer shortage is a real high-priority money issue.
+    r"\bcash\b.*\bshort\b", r"\bshort\b.*\bcash\b", r"\bdrawer\b.*\bshort\b",
     r"\ba\.c\b.*not working", r"\bac\b.*not working", r"\bgas delivery required\b"
 ]
 MEDIUM_PRIORITY_PATTERNS = [r"\bplease\b", r"\bpls\b", r"\bsend\b", r"\bupdate\b", r"\bcheck\b", r"\bpost\b", r"\blook into\b", r"\brequired\b"]
