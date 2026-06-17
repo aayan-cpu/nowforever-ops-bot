@@ -9,15 +9,17 @@ Spaces are configurable via env so they can be retargeted without code changes.
 from __future__ import annotations
 
 import os
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
-from app import reports, chat_media, brain, store, sites
+from app import reports, chat_media, brain, store
 
 ESCALATE_HOURS = float(os.getenv("OPS_ESCALATE_HOURS", "36"))
 
 ALL_CAPTAINS = os.getenv("OPS_ALL_CAPTAINS_SPACE", "spaces/AAAAhO6H0_Y")
 OFFICES = os.getenv("OPS_OFFICES_SPACE", "spaces/AAAAaIRkgq8")
 ADMIN_DM = os.getenv("OPS_ADMIN_DM_SPACE", "spaces/6AxGNyAAAAE")  # aayan ↔ bot DM
+# Where the daily-report reminder nudge is posted (captains space by default).
+REPORT_REMINDER_SPACE = os.getenv("OPS_REPORT_REMINDER_SPACE", ALL_CAPTAINS)
 
 
 def _high_open_tasks(limit: int = 50) -> list[dict]:
@@ -63,28 +65,37 @@ def urgent_reminder() -> dict:
 
 
 def missing_reports() -> dict:
-    """Evening — which stations have not posted a daily report today."""
-    today = date.today().isoformat()
-    msgs = store.list_all("messages")
-    rooms, reported = set(), set()
-    for m in msgs:
-        rn = m.get("room_name") or ""
-        if not sites.is_station(rn):  # skips company-wide rooms, DMs, raw space ids
-            continue
-        # Group by canonical site so "11" and "11 N&F Windchase" count once.
-        canon = sites.canonical_name(rn)
-        rooms.add(canon)
-        ts = (m.get("created_at") or m.get("timestamp_raw") or "")[:10]
-        cats = m.get("categories") or ""
-        if ts == today and ("daily_shift_report" in cats or "day_report" in cats):
-            reported.add(canon)
-    missing = sorted(rooms - reported)
+    """Evening — DM the admin which stations have not posted a daily report today,
+    and call out any that are overdue (no report for several days)."""
+    status = reports.missing_daily_reports()
+    missing, overdue = status["missing"], status["overdue"]
     if not missing:
         ok = chat_media.post_to_space(ADMIN_DM, "✅ All stations have posted a daily report today.")
-        return {"ok": ok, "kind": "missing_reports", "missing": 0}
+        return {"ok": ok, "kind": "missing_reports", "missing": 0, "overdue": 0}
     lines = ["📋 *Stations missing a daily report today:*"] + [f"• {r}" for r in missing]
+    if overdue:
+        lines.append("")
+        lines.append("⏰ *Overdue (no report in a while):*")
+        for o in overdue:
+            last = o["last_report"] or "never"
+            since = f"{o['days_since']}d ago" if o["days_since"] is not None else "no report on record"
+            lines.append(f"• {o['site']} — last report {last} ({since})")
     ok = chat_media.post_to_space(ADMIN_DM, "\n".join(lines))
-    return {"ok": ok, "kind": "missing_reports", "missing": len(missing)}
+    return {"ok": ok, "kind": "missing_reports", "missing": len(missing), "overdue": len(overdue)}
+
+
+def report_reminder() -> dict:
+    """Nudge the captains space to submit today's report. Posts only when some
+    station still owes one, so it stays quiet on fully-reported days."""
+    status = reports.missing_daily_reports()
+    missing = status["missing"]
+    if not missing:
+        return {"ok": True, "kind": "report_reminder", "skipped": "all reported", "missing": 0}
+    lines = ["🔔 *Daily report reminder* — these stations still owe today's report:"]
+    lines += [f"• {r}" for r in missing]
+    lines.append("\nPlease post your daily/shift report when you get a moment. Thank you!")
+    ok = chat_media.post_to_space(REPORT_REMINDER_SPACE, "\n".join(lines))
+    return {"ok": ok, "kind": "report_reminder", "missing": len(missing)}
 
 
 def ceo_summary() -> dict:
@@ -206,6 +217,7 @@ JOBS = {
     "morning-digest": morning_digest,
     "urgent-reminder": urgent_reminder,
     "missing-reports": missing_reports,
+    "report-reminder": report_reminder,
     "ceo-summary": ceo_summary,
     "weekly-report": weekly_report,
     "weekly-digest": weekly_digest,
