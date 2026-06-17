@@ -27,10 +27,8 @@
 - [ ] (DONE-PARTIAL) Response-quality root cause FIXED (grounding on complete aggregates, commit 0f4255f). Remaining quality items split into the 4 tasks above. NEEDS DEPLOY to take effect.
 
 
-- [ ] (ASSIGNED:desktop-ebh1kd9-8341) **Dashboard surfaces reconcile + scorecard** — render fuel-reconcile mismatches and per-store scorecard in the HTML views. mainly: app/reports.py  branch: —
 - [ ] (TODO) **Veeder-Root reading OCR** — parse tank-gauge reading photos (complements BOL OCR). mainly: app/vision.py  branch: —
 
-- [ ] (TODO) **Multi-turn conversation memory** — let the brain remember the last few turns per user so follow-ups ("and the other one?") resolve. mainly: app/brain.py  branch: —
 
 ## In progress
 
@@ -42,6 +40,8 @@
 
 ## Done
 
+- [x] (DONE) **Multi-turn conversation memory** [worker 3575, merged by pc-mgr]
+- [x] (DONE) **Dashboard reconcile + scorecard view** [worker 8341, merged by pc-mgr]
 - [x] (DONE) **Proactive reconciliation alerts** — high-priority alert on BOL/Veeder mismatch over threshold [worker 3575, merged by pc-mgr]
 - [x] (DONE) **Webhook bearer-token verification** — pure-stdlib RS256 JWT verify (strict PKCS#1 v1.5, iss/aud/exp, cert cache), gated by OPS_VERIFY_CHAT_TOKEN. Security blocker closed. [worker 3575, merged by pc-mgr]
 - [x] (DONE) **Report cutoff + late flagging** — per-store expected report times, flag late [worker 3575, merged by pc-mgr]
