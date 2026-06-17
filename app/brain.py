@@ -95,8 +95,9 @@ PERSONA = (
     "in each store (likely works there), and who the admins/managers are — for any "
     "'who works at X', 'who's the manager', or 'who is <person>' question.\n"
     "- When the user asks about a specific issue/message ('where did Annus mention SSCS', "
-    "'show me where they said the pumps are down'), use search_history and include the "
-    "🔗 link it returns so the user can jump straight to the original message.\n"
+    "'show me where they said the pumps are down'), use search_history. Quote who said it "
+    "and when, and include the 🔗 link it returns so they can open that store's chat (the "
+    "link opens the room, not the exact line — the sender + date help them find it).\n"
     "- You can act: close or assign tasks directly when asked — just do it and confirm "
     "naturally."
 )
@@ -426,18 +427,16 @@ def store_chat_spaces() -> list:
 
 
 def _message_link(m: dict) -> str:
-    """Google Chat deep link to a stored message, built from its data_id
-    (spaces/<space>/messages/<msg>). '' if it isn't a real Chat message id."""
-    data_id = m.get("data_id") or ""
-    if "/messages/" not in data_id:
+    """Link to the Google Chat conversation a stored message is in (room or DM).
+    We link the ROOM, not the exact message: Chat doesn't reliably deep-link to a
+    single message (the message-id URL opens an empty thread), but the room link
+    always opens the right store chat. Paired with the sender+date+snippet so it's
+    easy to find the exact line."""
+    space = (m.get("room_id") or "").replace("spaces/", "").strip()
+    if not space or "/" in space or space.startswith(("live-", "Direct")):
         return ""
-    try:
-        space = data_id.split("/messages/", 1)[0].replace("spaces/", "")
-        msg_id = data_id.split("/messages/", 1)[1]
-        kind = "dm" if m.get("is_dm") else "room"
-        return f"https://chat.google.com/{kind}/{space}/{msg_id}"
-    except Exception:
-        return ""
+    kind = "dm" if m.get("is_dm") else "room"
+    return f"https://chat.google.com/{kind}/{space}"
 
 
 def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> str:
@@ -567,7 +566,7 @@ def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> st
                         f"{(m.get('message') or '')[:160]}")
                 link = _message_link(m)
                 if link:
-                    line += f"\n  🔗 {link}"
+                    line += f"\n  🔗 open {m.get('room_name')}: {link}"
                 out.append(line)
             return "\n".join(out)
         if name == "create_task":
