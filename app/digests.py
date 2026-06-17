@@ -259,8 +259,15 @@ def remap_rooms() -> dict:
     return {"ok": True, "kind": "remap_rooms", **sync.remap_space_ids()}
 
 
+def ocr_pass() -> dict:
+    """Throttled OCR of day-report/BOL images the text-only sync skipped."""
+    from app import sync
+    return {"ok": True, "kind": "ocr_pass", **sync.ocr_pass()}
+
+
 JOBS = {
     "sync": sync_messages,
+    "ocr-pass": ocr_pass,
     "remap-rooms": remap_rooms,
     "morning-digest": morning_digest,
     "urgent-reminder": urgent_reminder,

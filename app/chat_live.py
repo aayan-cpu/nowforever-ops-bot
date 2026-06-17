@@ -310,9 +310,14 @@ def ingest_live_event(event: dict, db_path: str = DB_PATH, analyze: bool = True)
 
     # Auto-read only OPERATIONAL images (reports, BOLs, deliveries, equipment, money).
     # Other photos are still logged; the bot reads them on demand if someone asks.
-    vis = analyze_images(msg) if (analyze and _is_operational(c, msg["message"])) else _no_vision()
+    operational = _is_operational(c, msg["message"])
+    vis = analyze_images(msg) if (analyze and operational) else _no_vision()
     priority = "high" if vis["needs_review"] else c.priority
     is_task = c.is_task or vis["needs_review"]
+    # If we skipped image AI (sync, analyze=False) but there ARE operational images,
+    # remember the attachment refs so the throttled OCR pass can read them later.
+    imgs = msg.get("image_attachments") or []
+    needs_ocr = bool(imgs) and not analyze and operational
 
     now = datetime.now(timezone.utc).isoformat()
     message_doc = store.create("messages", {
@@ -331,6 +336,8 @@ def ingest_live_event(event: dict, db_path: str = DB_PATH, analyze: bool = True)
         "dedupe_key": c.dedupe_key,
         "confidence": c.confidence, "is_duplicate": False, "created_at": now,
         "vision_summary": vis["summary"], "vision": json.dumps(vis["results"]),
+        "needs_ocr": needs_ocr,
+        "image_refs": json.dumps(imgs) if needs_ocr else "[]",
     })
     message_id = message_doc["id"]
 

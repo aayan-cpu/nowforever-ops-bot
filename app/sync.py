@@ -105,6 +105,46 @@ def sync_once(per_room: int = 25, max_new_per_room: int = 40) -> dict:
     return result
 
 
+def ocr_pass(batch: int = 6) -> dict:
+    """Throttled image OCR: read a few day-report/BOL photos the text-only sync
+    skipped. Reuses analyze_images (download + AI + store day_reports/fuel_events +
+    cash/vendor reconciliation + alerts), then clears the needs_ocr flag. Small batch
+    per run keeps it cheap; runs on a schedule until the backlog drains."""
+    from app.chat_live import analyze_images
+
+    pending = [m for m in store.list_all("messages") if m.get("needs_ocr")]
+    pending.sort(key=lambda m: m.get("seq") or 0, reverse=True)  # newest first
+    processed = flagged = errors = 0
+    for m in pending[:batch]:
+        try:
+            refs = json.loads(m.get("image_refs") or "[]")
+        except Exception:
+            refs = []
+        synth = {"room_name": m.get("room_name"), "message": m.get("message") or "",
+                 "data_id": m.get("data_id"), "image_attachments": refs}
+        try:
+            vis = analyze_images(synth)
+            patch = {"needs_ocr": False, "image_refs": "[]",
+                     "vision_summary": vis.get("summary") or "",
+                     "vision": json.dumps(vis.get("results") or [])}
+            if vis.get("needs_review"):
+                patch.update(priority="high", is_task=True)
+                flagged += 1
+            store.patch("messages", m["id"], patch)
+            processed += 1
+        except Exception as e:
+            errors += 1
+            print(f"[ocr] {m.get('id')}: {e}", flush=True)
+            try:
+                store.patch("messages", m["id"], {"needs_ocr": False})  # don't retry-loop forever
+            except Exception:
+                pass
+    result = {"pending": len(pending), "processed": processed,
+              "flagged": flagged, "errors": errors}
+    print(f"[ocr] {result}", flush=True)
+    return result
+
+
 def remap_space_ids() -> dict:
     """Maintenance: messages synced before display names were captured got
     room_name = the raw 'spaces/...' id. Re-label them to the room's friendly name."""
