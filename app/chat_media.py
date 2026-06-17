@@ -272,3 +272,19 @@ def image_attachments(message_obj: dict) -> list[dict]:
             out.append({"resource_name": ref, "content_type": ctype,
                         "name": a.get("contentName") or a.get("name") or "image"})
     return out
+
+
+def pdf_attachments(message_obj: dict) -> list[dict]:
+    """Return [{resource_name, content_type, name}] for PDF attachments — the
+    preferred (text-based) day-report format."""
+    out = []
+    for a in (message_obj.get("attachment") or message_obj.get("attachments") or []):
+        if not isinstance(a, dict):
+            continue
+        ctype = a.get("contentType") or a.get("content_type") or ""
+        name = a.get("contentName") or a.get("name") or ""
+        ref = (a.get("attachmentDataRef") or {}).get("resourceName") or a.get("resourceName")
+        if ref and (ctype == "application/pdf" or name.lower().endswith(".pdf")):
+            out.append({"resource_name": ref, "content_type": "application/pdf",
+                        "name": name or "report.pdf"})
+    return out

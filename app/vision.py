@@ -216,6 +216,37 @@ def analyze_image(image_bytes: bytes, media_type: str = "image/jpeg", context: s
     return _reconcile(data)
 
 
+def analyze_text(report_text: str, context: str = "") -> dict:
+    """Pull the same structured day-report/BOL fields from already-extracted TEXT
+    (e.g. a PDF day report) — far more reliable than image OCR. Raises on API failure."""
+    if not enabled():
+        raise RuntimeError("ANTHROPIC_API_KEY not set; vision is disabled")
+    if not (report_text or "").strip():
+        return _reconcile({"doc_type": "day_report", "summary": ""})
+    prompt = (_PROMPT
+              + (f"\n\nChat context: {context}" if context else "")
+              + "\n\nBelow is the TEXT extracted from a report DOCUMENT (e.g. a PDF "
+                "day report). Read the structured fields directly from it:\n\n"
+              + report_text[:18000])
+    body = {
+        "model": MODEL,
+        "max_tokens": 1024,
+        "output_config": {"format": {"type": "json_schema", "schema": _SCHEMA}},
+        "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}]}],
+    }
+    req = urllib.request.Request(ENDPOINT, data=json.dumps(body).encode(), headers={
+        "x-api-key": os.environ[API_KEY_ENV],
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    })
+    try:
+        resp = json.loads(urllib.request.urlopen(req, context=_ctx, timeout=60).read())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"Claude text {e.code}: {e.read().decode()[:300]}") from None
+    text = next((b["text"] for b in resp.get("content", []) if b.get("type") == "text"), "")
+    return _reconcile(json.loads(text))
+
+
 # ----------------------------------------------------------- receipt OCR
 # Canonical fuel grades. Maps the many ways a grade is printed on BOLs/receipts
 # (and octane numbers) to one label, so per-product gallons aggregate correctly.
