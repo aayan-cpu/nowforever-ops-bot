@@ -52,13 +52,28 @@ _SCHEMA = {
         "amounts": {"type": "array", "items": {"type": "string"}, "description": "Dollar amounts seen."},
         "gallons": {"type": "array", "items": {"type": "string"}, "description": "Any gallon figures seen."},
         "prices": {"type": "array", "items": {"type": "string"}, "description": "Per-gallon prices seen."},
+        # Per-product breakdown for BOL / fuel-delivery receipts (the OCR target).
+        "products": {
+            "type": "array",
+            "description": "Per-grade fuel line items on a BOL / fuel-delivery receipt.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "product": {"type": ["string", "null"], "description": "Fuel grade as printed (Regular/Unleaded/Plus/Super/Premium/Diesel/DEF)."},
+                    "gallons": {"type": ["number", "null"], "description": "Gallons for this grade, else null."},
+                    "unit_price": {"type": ["number", "null"], "description": "Per-gallon price for this grade, else null."},
+                },
+                "required": ["product", "gallons", "unit_price"],
+                "additionalProperties": False,
+            },
+        },
         "site_hint": {"type": ["string", "null"], "description": "Site/store name or number if visible."},
         "model_flagged_issue": {"type": "boolean", "description": "Does the image show a problem worth a human review (missing/blank fields, math that doesn't add up, damage, error, outage, anomaly)?"},
     },
     "required": ["doc_type", "summary", "bol_gallons", "veeder_gallons",
                  "report_date", "shift", "total_sales", "inside_sales",
                  "fuel_gallons_sold", "fuel_sales",
-                 "amounts", "gallons", "prices", "site_hint", "model_flagged_issue"],
+                 "amounts", "gallons", "prices", "products", "site_hint", "model_flagged_issue"],
     "additionalProperties": False,
 }
 
@@ -66,6 +81,9 @@ _PROMPT = (
     "You are an operations assistant for a chain of gas stations. Examine this "
     "image from a station chat and extract the structured fields.\n"
     "- Bill of Lading (BOL): read the TOTAL gallons delivered into bol_gallons.\n"
+    "- Fuel-delivery receipt / BOL line items (doc_type='fuel_receipt' or 'bol'): "
+    "for EACH fuel grade, add a `products` entry with the grade name, its gallons, "
+    "and per-gallon price if shown (e.g. Regular 5,000 gal, Super 1,200 gal, Diesel 2,000 gal).\n"
     "- Veeder-Root tank monitor reading: read the gallons into veeder_gallons.\n"
     "- Daily / shift / closing report (doc_type='day_report'): read report_date, shift, "
     "total_sales, inside_sales (store/merchandise sales $), fuel_sales ($), and "
@@ -167,8 +185,101 @@ def analyze_image(image_bytes: bytes, media_type: str = "image/jpeg", context: s
     return _reconcile(data)
 
 
+# ----------------------------------------------------------- receipt OCR
+# Canonical fuel grades. Maps the many ways a grade is printed on BOLs/receipts
+# (and octane numbers) to one label, so per-product gallons aggregate correctly.
+PRODUCT_ALIASES = {
+    "regular": "Regular", "unleaded": "Regular", "unl": "Regular", "reg": "Regular",
+    "regular unleaded": "Regular", "87": "Regular", "e87": "Regular",
+    "plus": "Plus", "midgrade": "Plus", "mid-grade": "Plus", "mid": "Plus", "89": "Plus",
+    "super": "Super", "premium": "Super", "prem": "Super", "supreme": "Super",
+    "ultra": "Super", "91": "Super", "92": "Super", "93": "Super",
+    "diesel": "Diesel", "dsl": "Diesel", "ulsd": "Diesel", "off-road diesel": "Diesel",
+    "def": "DEF", "ethanol": "Ethanol", "e85": "Ethanol", "kerosene": "Kerosene",
+}
+
+
+def _to_number(v):
+    """Coerce '5,000', '5000.0', 5000 -> float; junk/None -> None."""
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip().lower()
+    s = s.replace(",", "").replace("$", "").replace("gal", "").replace("gallons", "").strip()
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def normalize_product(name) -> str | None:
+    """Map a printed grade name to a canonical label, else a Title-cased
+    fallback, else None for empty input."""
+    if not name:
+        return None
+    key = " ".join(str(name).lower().split())
+    if key in PRODUCT_ALIASES:
+        return PRODUCT_ALIASES[key]
+    # token scan: 'no-lead regular 87' -> Regular
+    for tok in key.replace("-", " ").split():
+        if tok in PRODUCT_ALIASES:
+            return PRODUCT_ALIASES[tok]
+    return " ".join(w.capitalize() for w in key.split()) or None
+
+
+def parse_products(raw_products) -> list[dict]:
+    """Normalize the model's `products` line items: canonical grade name, numeric
+    gallons/unit_price. Drops entries with neither a product nor gallons."""
+    out: list[dict] = []
+    for item in raw_products or []:
+        if not isinstance(item, dict):
+            continue
+        product = normalize_product(item.get("product"))
+        gallons = _to_number(item.get("gallons"))
+        unit_price = _to_number(item.get("unit_price"))
+        if product is None and gallons is None:
+            continue
+        out.append({"product": product, "gallons": gallons, "unit_price": unit_price})
+    return out
+
+
+def receipt_totals(products: list[dict]) -> dict:
+    """Aggregate parsed products into total gallons and a per-grade breakdown."""
+    by_product: dict[str, float] = {}
+    total = 0.0
+    any_gallons = False
+    for p in products:
+        g = p.get("gallons")
+        if g is None:
+            continue
+        any_gallons = True
+        total += g
+        if p.get("product"):
+            by_product[p["product"]] = round(by_product.get(p["product"], 0.0) + g, 2)
+    return {"total_gallons": round(total, 2) if any_gallons else None,
+            "by_product": by_product}
+
+
+def extract_receipt(data: dict) -> dict:
+    """Attach normalized products + totals to a vision result. For BOL/receipt
+    docs, backfill bol_gallons from the summed line items when the model didn't
+    give a single total."""
+    products = parse_products(data.get("products"))
+    data["products"] = products
+    totals = receipt_totals(products)
+    data["receipt_total_gallons"] = totals["total_gallons"]
+    data["products_by_grade"] = totals["by_product"]
+    if (data.get("doc_type") in {"bol", "fuel_receipt"}
+            and not isinstance(data.get("bol_gallons"), (int, float))
+            and totals["total_gallons"] is not None):
+        data["bol_gallons"] = totals["total_gallons"]
+    return data
+
+
 def _reconcile(data: dict) -> dict:
     """Recompute the BOL vs Veeder discrepancy in Python (don't trust model math)."""
+    extract_receipt(data)
     bol = data.get("bol_gallons")
     veeder = data.get("veeder_gallons")
     discrepancy = None
