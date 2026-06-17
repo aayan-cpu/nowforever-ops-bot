@@ -28,11 +28,9 @@
 - [ ] (TODO) **Dead single-word commands** — early logs show "alerts"/"reports"/"report" replying just "Got it." instead of acting. Audit the command router in `app/chat_live.py` so bare keywords hit the real handlers (or fall through to the brain), never a blank ack. mainly: app/chat_live.py  branch: —
 - [ ] (DONE-PARTIAL) Response-quality root cause FIXED (grounding on complete aggregates, commit 0f4255f). Remaining quality items split into the 4 tasks above. NEEDS DEPLOY to take effect.
 - [ ] (TODO) **Webhook bearer-token verification** for `/chat/events` (security hole: accepts any request). NOTE FROM MANAGER: Google Chat sends `Authorization: Bearer <JWT>` signed by `chat@system.gserviceaccount.com`, audience = the project number. `cryptography` is NOT installed (breaks on Py 3.14) — do RS256 verification the stdlib way, mirroring the JWT *signing* pattern already in `app/chat_media.py:_sa_key_token`. Verify sig (Google x509 certs, cached), `iss`, `aud` (new env `OPS_CHAT_AUDIENCE`), `exp`. Gate behind env `OPS_VERIFY_CHAT_TOKEN=1` so it can't dark the live bot before the audience is configured. New module `app/chat_auth.py`; wire into `app/server.py` do_POST `/chat/events`. mainly: app/chat_auth.py (new), app/server.py  branch: —
-- [ ] (ASSIGNED:desktop-ebh1kd9-1774) **Dashboard auth** for `/dashboard`, `/tasks`, `/alerts` — token-based (e.g. `?token=` / `X-Ops-Token` vs new `OPS_DASHBOARD_TOKEN`), gated so it stays open when the env var is unset. mainly: app/server.py  branch: —
 - [ ] (ASSIGNED:desktop-ebh1kd9-0832) **Weekly digest job** (per-room summary) — add a `JOBS` entry in `app/digests.py` (follow the existing daily-summary job), wired to `/cron/<name>`. mainly: app/digests.py  branch: —
 - [ ] (ASSIGNED:desktop-ebh1kd9-8341) **Site-name normalization** — one canonical resolver (e.g. "11", "Windchase", "11 N&F Windchase" → same site). mainly: new app/sites.py + callers  branch: —
 - [ ] (TODO) **Missing/overdue report detection + reminders** — flag sites that haven't reported, DM/post a reminder. mainly: app/digests.py + app/reports.py  branch: —
-- [ ] (TODO) **Test suite + smoke tests** — no `tests/` exists yet. Add pytest-free stdlib `unittest` tests for classifier, reports, server routes, and the new chat_auth. Highest-leverage for letting workers self-verify. mainly: tests/ (new)  branch: —
 - [ ] (TODO) **OCR for BOL / fuel-delivery receipts** (Phase 5) — `app/vision.py` exists; extract gallons/product from receipt images. mainly: app/vision.py  branch: —
 - [ ] (TODO) **Veeder-Root vs BOL mismatch detection** (Phase 5) — compare delivered (BOL) vs tank gauge, flag discrepancies like the ~2,500 gal Channelview case. mainly: new app/reconcile.py  branch: —
 - [ ] (TODO) **Scoped roles** (docs/ROLES.md "Planned") — `roles` map (email→role) with permission + store scope below admin. mainly: new app/roles.py + brain/command handlers  branch: —
@@ -48,6 +46,8 @@
 
 ## Done
 
+- [x] (DONE) **Test suite** — 77 unittest cases (classifier/reports/server) + fake-store harness [worker 8341, merged by pc-mgr]
+- [x] (DONE) **Dashboard auth** — OPS_DASHBOARD_TOKEN gate (hmac) on dashboard/data views + tests [worker 8686, merged by pc-mgr]
 - [x] (DONE) **Truncated task titles** — mention-stripping regex ate leading chars of titles ('@Admin 2,666' -> ',666'); fixed + 10 unit tests. [worker desktop-ebh1kd9-1774, merged by pc-mgr]
 - [x] (DONE) **Live incident fix** — uptime flapping ("Ops Bot Down" alerts). Single-threaded HTTPServer let a 45s Claude call block the health probe; switched to ThreadingHTTPServer + added cheap `/healthz`. NEEDS DEPLOY + repoint uptime check to /healthz + `--min-instances=1`. [pc-mgr]
 - [x] (DONE) Fix README architecture drift (fake modules, FastAPI→http.server, SQLite→Firestore, room mapping note). [pc-mgr]
