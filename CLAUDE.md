@@ -1,28 +1,33 @@
 # CLAUDE.md — instructions for every Claude Code session in this repo
 
-This repo uses **multi-terminal coordination**. Several Claude Code sessions
-(Mac, the 24/7 Windows PC, etc.) work in parallel. GitHub is the single source
-of truth — sessions coordinate only through committed state, never directly.
+This repo uses **manager-funnel multi-terminal coordination**. Several Claude Code
+sessions work in parallel, but there is **ONE official line into GitHub: the
+MANAGER.** Workers report to the manager; the manager is the only session that
+updates `main`. GitHub is the source of truth — sessions coordinate only through
+committed state, never by talking directly.
 
 Full design: `docs/MULTI_AGENT_COORDINATION.md`. Board: `WORK.md`.
 
-## First, know your role
+## Roles
 
-There are two kinds of session:
+- **MANAGER** (the 24/7 PC, session-id `pc-mgr`, runs in its own clone
+  `nf-ops-manager`): the **sole writer of `main`**. Owns `WORK.md`, assigns work,
+  reviews every branch/PR, merges to `main`, updates the board, deletes merged
+  branches. Does not write feature code unless the human asks.
+- **WORKER** (any other terminal/machine, its own clone): implements ONE task at a
+  time on its own branch and **reports to the manager** by pushing that branch and
+  opening a PR. A worker **never** writes to `main`.
 
-- **MANAGER** (runs on the 24/7 PC, session-id `pc-mgr`): maintains `WORK.md`
-  from the human's goals, reviews PRs, and is the **only** session that merges to
-  `main`. The manager does **not** write feature code unless explicitly asked — it
-  orchestrates.
-- **WORKER** (Mac, second PC, etc.): claims one task at a time and implements it
-  on a branch.
+If the human hasn't said which you are, assume **WORKER** unless you're the manager
+clone on the 24/7 PC.
 
-If the human hasn't said which you are, assume **WORKER** unless you're running on
-the 24/7 PC `DESKTOP-EBH1KD9` (that one is the manager `pc-mgr`).
+## One clone per session (hard rule)
 
-## Worker startup ritual (do this FIRST, before anything else)
+Two sessions must **never** share a folder — they'd share one git working tree and
+corrupt each other. Each session gets its own clone:
+`git clone <repo> nf-worker-<n>` and run there.
 
-Don't ask the human for an id — generate your own and register:
+## Worker startup ritual (do this FIRST)
 
 ```bash
 git pull --rebase
@@ -30,44 +35,54 @@ SESSION_ID=$(bash scripts/agent_register.sh | tail -n1)   # e.g. "macbook-air-48
 echo "I am worker $SESSION_ID"
 ```
 
-That registers you in `.agents/<id>.log` and pushes it, so the manager can see
-you're online. Use `$SESSION_ID` in every claim below. Re-run
-`bash scripts/agent_register.sh heartbeat "$SESSION_ID"` every ~10 min so the
-manager knows you're still alive (a CLAIMED task with no heartbeat >30 min gets
-reclaimed). Then immediately claim a task per the protocol below.
+Your `.agents/<id>.log` heartbeat is the **only** thing you may push to `main` — it
+is append-only presence, never conflicts. Re-run
+`bash scripts/agent_register.sh heartbeat "$SESSION_ID"` every ~10 min. You may also
+append free-text status lines to your own log to report to the manager, e.g.
+`echo "$(date -u +%FT%TZ) status ($SESSION_ID): starting weekly-digest" >> .agents/$SESSION_ID.log && git add .agents && git commit -qm note && git push -q`.
 
 ## Worker protocol (follow exactly)
 
-1. **Pull first.** `git pull --rebase` before reading `WORK.md` or starting work.
-2. **Claim before coding.** Edit the task's row in `WORK.md` to
-   `(CLAIMED:<session-id>)`, fill in `branch: feat/<short-name>`, commit, and
-   **push**. If the push is rejected, someone claimed first — `git pull --rebase`
-   and pick a different task. This is the anti-duplication lock (first push wins).
-3. **One branch per task.** `feat/<short-name>`. **Never commit features to `main`.**
-4. **When done**, set the row to `(REVIEW:<branch>)`, commit, push, and open a PR
-   against `main`. Do **not** merge it yourself.
-5. **Heartbeat (optional).** Append a timestamped line to `.agents/<session-id>.log`
-   and push every ~10 min so the manager can see you're online.
+1. **Pull `main`** (read-only): `git pull --rebase`. Read `WORK.md`.
+2. **Pick a task.** Prefer one the manager has marked `ASSIGNED:<your-id>`. If none
+   is assigned to you, pick an unclaimed `TODO` whose `mainly:` files no active
+   branch is already touching (`git fetch && git branch -r` shows active work).
+3. **Branch — never touch `main` or `WORK.md`.** `git checkout -b feat/<task-slug>__<your-id>`.
+   Pushing this branch IS your claim + report; the manager sees it via fetch.
+   If your branch name collides with someone else's task, you picked a dup — switch.
+4. **Implement + test** (`py -m unittest ...` / `py -m app.server`). Keep commits on
+   your branch. Push the branch.
+5. **Report done:** open a PR against `main` and append a
+   `ready for review: feat/<...>` line to your `.agents/<id>.log`. **Do NOT merge.**
+   The manager reviews, merges, and updates the board.
+6. If blocked, append a `blocked: <reason>` line to your log and pick another task.
 
-## Manager protocol
+## Manager protocol (sole owner of `main` + `WORK.md`)
 
-- Maintain `WORK.md` from the human's stated goals.
-- `git pull`, scan the board + `.agents/*.log`, report status to the human.
-- Reassign stale claims (no heartbeat > 30 min on a CLAIMED task).
-- Review `REVIEW:` PRs; merge to `main`; delete merged branches.
+- Own `WORK.md` end to end: keep TODO/ASSIGNED/REVIEW/DONE accurate. Workers don't
+  edit it — you do.
+- `git fetch`, scan remote `feat/*` branches + `.agents/*.log` to see who's working
+  on what; report status to the human.
+- Assign work by setting `ASSIGNED:<worker-id>` on a task row when a worker is idle.
+- Review each worker branch/PR; run its tests; merge to `main` (no-ff); move the row
+  to DONE with attribution; delete the merged branch.
+- Reassign stale work (no heartbeat > 30 min).
 - Only write feature code when the human explicitly asks.
 
 ## Never
 
-- Never let a worker merge to `main`.
-- Never commit feature work straight to `main` (branch + PR always).
-- Never start coding a task without first claiming it in `WORK.md` and pushing.
+- A worker never pushes to `main` (only its own `.agents/<id>.log` heartbeat).
+- A worker never edits `WORK.md` or merges — the manager owns both.
+- Never run two sessions in the same folder.
 
 ## Project quick-reference
 
-- App: Python (FastAPI-lite, stdlib-heavy — avoids pydantic/pandas/uvicorn for
-  Python 3.14 compatibility). Entry: `python -m app.server`.
-- Persistence: SQLite (`OPS_DB_PATH`), Firestore planned.
+- App: Python, **stdlib `http.server`** (no FastAPI/uvicorn — Py 3.14 compat).
+  Entry: `py -m app.server`. Health probe: `/healthz`.
+- Persistence: **Firestore via REST** (`app/store.py`) is the live store; SQLite
+  (`app/database.py`) is only the offline Vault ingest.
+- AI brain: `app/brain.py` (Claude REST, model env `OPS_BRAIN_MODEL`); grounds on
+  `reports.dashboard()` complete aggregates — never invent stores/numbers.
 - Deploy: Cloud Run, project `nfchatbot-498419`, region `us-central1`.
 - Do **not** commit: `*.sqlite3`/`*.db`, `.env`, Vault exports (mbox/CSV),
   service-account JSON, or files with real employee PII.
