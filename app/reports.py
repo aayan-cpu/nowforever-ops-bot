@@ -3,10 +3,10 @@ from __future__ import annotations
 import html
 import json
 import os
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
-from app import store, sites
+from app import store, sites, reconcile
 
 
 def _sort_recent(rows: list[dict]) -> list[dict]:
@@ -72,6 +72,48 @@ def high_priority(db_path: str | None = None, limit: int = 50) -> list[dict]:
     rows = [m for m in store.list_all("messages")
             if m.get("priority") == "high" and not m.get("is_duplicate")]
     return _sort_recent(rows)[:limit]
+
+
+def fuel_discrepancies(db_path: str | None = None, threshold: int | None = None) -> list[dict]:
+    """Flagged BOL-vs-Veeder mismatches for the dashboard (delegates to
+    app.reconcile, which reads the live ``fuel_events`` collection)."""
+    return reconcile.discrepancies(threshold=threshold)
+
+
+def store_scorecards(db_path: str | None = None, limit: int = 20) -> list[dict]:
+    """Per-station health rows for the dashboard: message volume, high-priority
+    count, open-task count, and the top open issue type. Keyed by canonical site
+    so "11" and "11 N&F Windchase" collapse into one card. Busiest first."""
+    cards: dict[str, dict] = {}
+
+    def _card(name: str) -> dict:
+        key = sites.canonical_name(name) if sites.is_station(name) else (name or "Unknown")
+        return cards.setdefault(key, {"room_name": key, "messages": 0, "high": 0,
+                                      "open_tasks": 0, "high_tasks": 0, "_cats": Counter()})
+
+    for m in store.list_all("messages"):
+        if m.get("is_duplicate"):
+            continue
+        c = _card(m.get("room_name") or "Unknown")
+        c["messages"] += 1
+        if m.get("priority") == "high":
+            c["high"] += 1
+    for t in store.list_all("tasks"):
+        if (t.get("status") or "open") != "open":
+            continue
+        c = _card(t.get("room_name") or "Unknown")
+        c["open_tasks"] += 1
+        if t.get("priority") == "high":
+            c["high_tasks"] += 1
+        c["_cats"][t.get("category") or "other"] += 1
+
+    out = []
+    for c in cards.values():
+        cats = c.pop("_cats")
+        c["top_issue"] = cats.most_common(1)[0][0] if cats else "—"
+        out.append(c)
+    out.sort(key=lambda c: (c["open_tasks"], c["high"], c["messages"]), reverse=True)
+    return out[:limit]
 
 
 # Categories that count as a station's daily/shift report being posted.
@@ -323,6 +365,15 @@ def render_text_report(db_path: str = "data/ops_bot.sqlite3") -> str:
     return "\n".join(lines)
 
 
+def _g(v) -> str:
+    """Format a gallon value for the dashboard: blank for None, trimmed float."""
+    if v is None:
+        return "—"
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
+    return html.escape(f"{v:,}" if isinstance(v, (int, float)) else str(v))
+
+
 def _badge(priority: str) -> str:
     return f"<span class='badge {html.escape(priority or 'normal')}'>{html.escape(priority or 'normal')}</span>"
 
@@ -353,6 +404,34 @@ def render_dashboard_html(db_path: str = "data/ops_bot.sqlite3") -> str:
     for cat, count in cats:
         html_parts.append(f"<span class='chip'>{html.escape(cat)} <b>{count}</b></span>")
     html_parts.append("</div></section>")
+
+    # Fuel reconciliation: flagged BOL-vs-Veeder mismatches.
+    flagged = fuel_discrepancies(db_path)
+    html_parts.append(f"<section><h2>Fuel Reconciliation <span class='cat'>{len(flagged)} flagged</span></h2>")
+    if not flagged:
+        html_parts.append("<p><small>No BOL vs Veeder-Root discrepancies above threshold.</small></p>")
+    else:
+        html_parts.append("<table><tr><th>Store</th><th>Date</th><th>BOL</th><th>Veeder</th><th>Diff (gal)</th></tr>")
+        for r in flagged:
+            html_parts.append(
+                f"<tr class='highline'><td>{html.escape(str(r.get('room_name') or ''))}</td>"
+                f"<td>{html.escape(str(r.get('report_date') or ''))}</td>"
+                f"<td>{_g(r.get('bol_gallons'))}</td><td>{_g(r.get('veeder_gallons'))}</td>"
+                f"<td><b>{_g(r.get('discrepancy_gallons'))}</b></td></tr>")
+        html_parts.append("</table>")
+    html_parts.append("</section>")
+
+    # Per-store scorecard.
+    cards = store_scorecards(db_path)
+    html_parts.append("<section><h2>Store Scorecard</h2><table><tr><th>Store</th><th>Open Tasks</th><th>High</th><th>Top Issue</th><th>Messages</th></tr>")
+    for c in cards:
+        room_url = "/rooms/" + html.escape(c['room_name']).replace(' ', '%20').replace('&', '%26')
+        html_parts.append(
+            f"<tr><td><a href='{room_url}'>{html.escape(c['room_name'])}</a></td>"
+            f"<td>{c['open_tasks']}</td><td>{c['high_tasks']}</td>"
+            f"<td><span class='cat'>{html.escape(c['top_issue'])}</span></td><td>{c['messages']}</td></tr>")
+    html_parts.append("</table></section>")
+
     html_parts.append("<section><h2>High Priority Alerts</h2>")
     for a in alerts:
         html_parts.append(f"<article class='item highline'><b>{html.escape(a['room_name'])}</b> {_badge('high')} <small>{html.escape(a.get('timestamp_raw') or '')}</small><p>{html.escape(a.get('message') or '')}</p><small>Sender: {html.escape(a.get('sender') or '')} · Assigned hint: {html.escape(a.get('assigned_hint') or '')}</small></article>")
