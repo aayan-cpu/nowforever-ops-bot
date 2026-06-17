@@ -49,6 +49,7 @@
 
 ## Done
 
+- [x] (DONE) **Truncated task titles** — mention-stripping regex ate leading chars of titles ('@Admin 2,666' -> ',666'); fixed + 10 unit tests. [worker desktop-ebh1kd9-1774, merged by pc-mgr]
 - [x] (DONE) **Live incident fix** — uptime flapping ("Ops Bot Down" alerts). Single-threaded HTTPServer let a 45s Claude call block the health probe; switched to ThreadingHTTPServer + added cheap `/healthz`. NEEDS DEPLOY + repoint uptime check to /healthz + `--min-instances=1`. [pc-mgr]
 - [x] (DONE) Fix README architecture drift (fake modules, FastAPI→http.server, SQLite→Firestore, room mapping note). [pc-mgr]
 - [x] (DONE) Firestore persistence — already implemented: live path uses `app/store.py` (Firestore REST); SQLite (`app/database.py`) remains only for the offline Vault ingest. No migration needed. [verified pc-mgr]
