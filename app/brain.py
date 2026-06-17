@@ -98,10 +98,10 @@ PERSONA = (
     "'whats the <thing> issue at X'), you MUST call lookup_site for that store FIRST and "
     "answer from its result. The SAMPLE in OPS DATA is incomplete per store — NEVER answer "
     "a store-specific question from the sample alone, and never say 'the rest isn't broken "
-    "out' — call the tool. For each issue, give WHEN it was reported (the date/time in the "
-    "tool result) and include the 🔗 link to that store's chat. For 'where did <person> say "
-    "<thing>' use search_history and quote who + when with the 🔗 link. Always give the "
-    "date/time and the link.\n"
+    "out' — call the tool. For EACH issue, state WHEN it was first reported (the 'first "
+    "reported <date/time>' in the tool result), e.g. 'pumps down — first reported Jun 16, "
+    "11:34 PM'. For 'where did <person> say <thing>' use search_history and quote who said "
+    "it and when. Always include the timestamp; no links needed.\n"
     "- You can act: close or assign tasks directly when asked — just do it and confirm "
     "naturally."
 )
@@ -574,13 +574,9 @@ def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> st
             hits = sorted(hits, key=lambda m: (m.get("seq") or 0, m.get("created_at") or ""), reverse=True)[:15]
             out = []
             for m in hits:
-                day = (m.get("sent_at") or m.get("created_at") or m.get("timestamp_raw") or "")[:10]
-                line = (f"[{m.get('room_name')}] {m.get('sender')} ({day}): "
-                        f"{(m.get('message') or '')[:160]}")
-                link = _message_link(m)
-                if link:
-                    line += f"\n  🔗 open {m.get('room_name')}: {link}"
-                out.append(line)
+                when = reports.fmt_ts(m.get("sent_at") or m.get("created_at") or m.get("timestamp_raw"))
+                out.append(f"[{m.get('room_name')}] {m.get('sender')} ({when}): "
+                           f"{(m.get('message') or '')[:160]}")
             return "\n".join(out)
         if name == "create_task":
             tid = store.next_seq("tasks")
@@ -614,13 +610,11 @@ def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> st
             s = rs.get("stats")
             if not s:
                 return f"No data found for site '{args.get('site')}'."
-            link = _room_link(room_name=s["room_name"])
-            out = [f"{s['room_name']}: {s['messages']} msgs, {s['tasks']} task-msgs, {s['high']} high-priority."
-                   + (f"  🔗 {link}" if link else "")]
+            out = [f"{s['room_name']}: {s['messages']} msgs, {s['tasks']} task-msgs, {s['high']} high-priority."]
             for t in rs.get("open_tasks", [])[:12]:
                 when = reports.fmt_ts(t.get("sent_at") or t.get("created_at"))
                 out.append(f"#{t['id']} ({t.get('priority')}) {t.get('task_title') or t.get('task_text')}"
-                           + (f"  — {when}" if when else ""))
+                           + (f"  — first reported {when}" if when else ""))
             return "\n".join(out)
         if name == "close_task":
             r = reports.task_action(None, int(args["task_id"]), "close")
