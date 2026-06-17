@@ -86,6 +86,11 @@ class ClassifiedMessage:
     task_title: str
     fingerprint: str
     confidence: float
+    # Coarse signature of a recurring operational issue (e.g. "11:gas_needed"),
+    # used to collapse repeated near-duplicate reports of the same problem at the
+    # same site into one task. "" when the message isn't a recognizable recurring
+    # issue (those fall back to the exact `fingerprint` for de-duplication only).
+    dedupe_key: str = ""
     # Canonical site this message is about, resolved from the room — or, for
     # company-wide rooms, from an explicit "store/site <n>" reference in the
     # text. None when no station can be attributed (DMs, broadcasts).
@@ -138,6 +143,50 @@ def make_fingerprint(room_name: str, message: str) -> str:
     norm = re.sub(r"[^a-z0-9$.,@:/ -]", "", norm)
     seed = f"{(room_name or '').lower()}|{norm[:500]}"
     return hashlib.sha1(seed.encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+
+# Recurring operational issues that get reported over and over for the same
+# store ("need gas", "power's out again", "ice machine still down"). Each maps a
+# canonical topic to the patterns that signal it. Kept deliberately tight so we
+# only collapse genuinely-recurring nuisance reports, never distinct messages.
+_RECURRING_TOPICS: dict[str, list[str]] = {
+    "gas_needed": [r"\bneed(s|ing)?\b.{0,15}\b(gas|fuel|diesel|gasoline)\b",
+                   r"\b(gas|fuel|diesel)\b.{0,15}\bneeded\b",
+                   r"\b(out of|low on|need a delivery of|no)\b.{0,10}\b(gas|fuel|diesel)\b",
+                   r"\b(gas|fuel|diesel)\b.{0,10}\b(delivery|run low|running low|empty)\b"],
+    "power_outage": [r"\b(power|electricity)\b.{0,12}\b(out|outage|off|down|gone)\b",
+                     r"\bno\s+power\b", r"\bpower\s*('s)?\s*out\b"],
+    "ice_machine_down": [r"\bice\s*machine\b.{0,20}\b(down|broke|broken|out|not working|leaking|frozen)\b"],
+    "printer_down": [r"\bprinter\b.{0,20}\b(down|broke|broken|not (printing|working)|jam)\b",
+                     r"\btickets?\b.{0,15}\bnot\s+printing\b"],
+    "pump_down": [r"\bpump\b.{0,20}\b(down|broke|broken|out of order|not working|offline)\b"],
+    "register_down": [r"\b(register|pos|till)\b.{0,20}\b(down|broke|broken|not working|frozen)\b"],
+}
+
+
+def recurring_issue_topic(text: str) -> str:
+    """Return the canonical recurring-issue topic for a message, or "" if none."""
+    low = (text or "").lower()
+    for topic, patterns in _RECURRING_TOPICS.items():
+        if any(re.search(p, low, flags=re.I | re.S) for p in patterns):
+            return topic
+    return ""
+
+
+def dedupe_key_for(site_key: str, text: str) -> str:
+    """Coarse near-duplicate key: ``"<site_key>:<topic>"`` when the message is a
+    recognizable recurring issue *and* attributable to a site, else "". Requiring
+    both keeps unrelated messages from ever colliding."""
+    topic = recurring_issue_topic(text)
+    if topic and site_key:
+        return f"{site_key}:{topic}"
+    return ""
+
+
+def are_near_duplicates(a: ClassifiedMessage, b: ClassifiedMessage) -> bool:
+    """True if two classified messages report the same recurring issue at the
+    same site (same non-empty dedupe_key)."""
+    return bool(a.dedupe_key) and a.dedupe_key == b.dedupe_key
 
 
 def extract_assignees(body: str) -> str | None:
@@ -258,6 +307,7 @@ def classify_message(text: str, attachment_count: int = 0, room_name: str = "") 
         confidence=round(confidence, 2),
         site=site,
         site_key=site_key,
+        dedupe_key=dedupe_key_for(site_key, body),
     )
 
 
