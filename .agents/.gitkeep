@@ -1,0 +1,5 @@
+# Heartbeat / presence directory.
+# Each worker session appends a timestamped line to .agents/<session-id>.log
+# every ~10 min and pushes. The manager reads these to see who is online and
+# whether a CLAIMED task has gone stale (no heartbeat > 30 min => reclaim).
+# This .gitkeep keeps the directory tracked when no logs exist.
