@@ -5,6 +5,8 @@ import hashlib
 from dataclasses import dataclass
 from typing import Iterable
 
+from app import sites
+
 # v2 rule classifier: lightweight, explainable, no external packages.
 # Goal: catch ops issues reliably before adding AI/Google Chat live mode.
 
@@ -84,6 +86,34 @@ class ClassifiedMessage:
     task_title: str
     fingerprint: str
     confidence: float
+    # Canonical site this message is about, resolved from the room — or, for
+    # company-wide rooms, from an explicit "store/site <n>" reference in the
+    # text. None when no station can be attributed (DMs, broadcasts).
+    site: str | None = None
+    site_key: str = ""
+
+
+# Explicit in-text site reference, e.g. "store 11", "site #4", "# 27". Bare
+# numbers are deliberately NOT treated as sites — in this domain they're almost
+# always quantities/prices ("2,666 gallons", "$11").
+_SITE_IN_TEXT = re.compile(r"\b(?:site|store|location)\s*#?\s*(\d{1,3})\b", re.I)
+
+
+def resolve_site(text: str, room_name: str = "") -> dict | None:
+    """Best-effort canonical site for a message.
+
+    The room it was posted in is the strongest signal, so a station room wins
+    outright. For a company-wide room / DM (where `sites.resolve` returns None),
+    fall back to an explicit "store/site <n>" reference in the message text.
+    Returns the `sites.resolve` record (``{number, name, key}``) or None.
+    """
+    room_site = sites.resolve(room_name)
+    if room_site:
+        return room_site
+    m = _SITE_IN_TEXT.search(text or "")
+    if m:
+        return sites.resolve(m.group(1))
+    return None
 
 
 def clean_text(text: str) -> str:
@@ -199,11 +229,20 @@ def classify_message(text: str, attachment_count: int = 0, room_name: str = "") 
     operational_category = any(c in cats for c in ["admin_request_task", "equipment_maintenance", "fuel_delivery_issue", "sales_issue"])
     is_task = (bool(TASK_VERBS.search(body)) or priority == "high" or operational_category) and not no_task
 
+    # Site context: which station is this message about? Knowing the site lets
+    # downstream attribution credit the right store even for messages posted in
+    # the company-wide room, and a confidently-resolved site is a small signal
+    # the classification is grounded in a real operational location.
+    site_rec = resolve_site(body, room_name)
+    site = site_rec["name"] if site_rec else None
+    site_key = site_rec["key"] if site_rec else ""
+
     confidence = 0.55
     if priority == "high": confidence += 0.20
     if operational_category: confidence += 0.15
     if extract_assignees(body): confidence += 0.05
     if attachment_count: confidence += 0.02
+    if site_rec: confidence += 0.03
     confidence = min(confidence, 0.98)
 
     return ClassifiedMessage(
@@ -217,6 +256,8 @@ def classify_message(text: str, attachment_count: int = 0, room_name: str = "") 
         task_title=title_from_message(body),
         fingerprint=make_fingerprint(room_name, body),
         confidence=round(confidence, 2),
+        site=site,
+        site_key=site_key,
     )
 
 
