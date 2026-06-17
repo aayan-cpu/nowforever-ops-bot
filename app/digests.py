@@ -320,6 +320,13 @@ def clear_dm_tasks() -> dict:
     return {"ok": True, "kind": "clear_dm_tasks", **sync.clear_dm_tasks()}
 
 
+def dedupe_tasks() -> dict:
+    """Collapse the task backlog to one live issue per (store, category); close
+    merged duplicates and stale survivors. Fixes the thousands-of-open-tasks pile-up."""
+    from app import sync
+    return {"ok": True, "kind": "dedupe_tasks", **sync.dedupe_tasks()}
+
+
 def gas_report_reminder() -> dict:
     """Daily reminder broadcast to every store chat to send the gas/day report.
     Message is editable via OPS_GAS_REPORT_MSG."""
@@ -338,6 +345,7 @@ JOBS = {
     "purge-bot-echo": purge_bot_echo,
     "clear-dr-alerts": clear_dr_alerts,
     "clear-dm-tasks": clear_dm_tasks,
+    "dedupe-tasks": dedupe_tasks,
     "backfill-dms": backfill_dms,
     "gas-report-reminder": gas_report_reminder,
     "morning-digest": morning_digest,

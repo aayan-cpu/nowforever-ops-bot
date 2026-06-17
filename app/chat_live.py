@@ -291,6 +291,26 @@ def _open_task_by_dedupe(dedupe_key: str) -> dict | None:
     return None
 
 
+def _open_task_by_site_category(room_name: str, category: str) -> dict | None:
+    """Collapse repeat reports into ONE open task per (store, category). Without
+    this, every "pumps down" / "I reset it" / "still broken" message at a store
+    spawns its own task and the open list balloons into thousands. Returns the
+    most-recently-updated open task for that store+category, or None."""
+    if not room_name or not category:
+        return None
+    try:
+        best = None
+        for t in store.find("tasks", "room_name", room_name, limit=400):
+            if (t.get("status") or "open") != "open" or (t.get("category") or "") != category:
+                continue
+            if best is None or (t.get("updated_at") or "") > (best.get("updated_at") or ""):
+                best = t
+        return best
+    except Exception as e:
+        print(f"[dedupe] site/cat {room_name}/{category}: {e}", flush=True)
+        return None
+
+
 def ingest_live_event(event: dict, db_path: str = DB_PATH, analyze: bool = True) -> dict:
     """Classify + store one Google Chat event in Firestore. Creates a task if action-worthy.
     `analyze=False` skips the (slow, paid) image AI — used by the bulk message sync so it
@@ -370,6 +390,11 @@ def ingest_live_event(event: dict, db_path: str = DB_PATH, analyze: bool = True)
         # the same store) into the existing open task rather than spawning a new
         # one. Only fires for recognizable recurring issues (c.dedupe_key set).
         dup = _open_task_by_dedupe(c.dedupe_key)
+        # No exact recurring-key match → still collapse into the store's existing
+        # open task of the same category (one live issue per store+category).
+        # Skip for image REVIEW tasks: each flagged photo is genuinely distinct.
+        if not dup and not vis["needs_review"]:
+            dup = _open_task_by_site_category(msg["room_name"], category)
         if dup:
             task_id = dup.get("id")
             collapsed = True

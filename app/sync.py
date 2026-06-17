@@ -17,6 +17,7 @@ import os
 import ssl
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone, timedelta
 
 from app import chat_media, store
 
@@ -269,6 +270,41 @@ def clear_dm_tasks() -> dict:
                 pass
     print(f"[clear-dm] downgraded {downgraded} msgs, closed {closed} tasks", flush=True)
     return {"messages_downgraded": downgraded, "dm_tasks_closed": closed}
+
+
+def dedupe_tasks(stale_days: int = 14) -> dict:
+    """Collapse the historical task backlog into one live issue per (store, category).
+    The bulk sync created a task for every action-worthy message, so the same problem
+    piled up into thousands of open tasks. This keeps the most-recent open task per
+    (store, category), closes the older duplicates as 'merged', and closes survivors
+    that have gone stale (no activity in `stale_days`, not high priority)."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=stale_days)).isoformat()
+    open_tasks = [t for t in store.list_all("tasks") if (t.get("status") or "open") == "open"]
+    groups: dict[tuple, list] = {}
+    for t in open_tasks:
+        groups.setdefault((t.get("room_name") or "", t.get("category") or ""), []).append(t)
+
+    merged = stale = 0
+    for key, ts in groups.items():
+        ts.sort(key=lambda x: (x.get("updated_at") or x.get("created_at") or ""), reverse=True)
+        survivor, dupes = ts[0], ts[1:]
+        for t in dupes:
+            try:
+                store.patch("tasks", t["id"], {"status": "closed", "closed_reason": "merged-duplicate"})
+                merged += 1
+            except Exception as e:
+                print(f"[dedupe-tasks] merge {t.get('id')}: {e}", flush=True)
+        # Close the survivor too if it's old and not high priority (resolved-by-silence).
+        last = survivor.get("updated_at") or survivor.get("created_at") or ""
+        if last and last < cutoff and survivor.get("priority") != "high":
+            try:
+                store.patch("tasks", survivor["id"], {"status": "closed", "closed_reason": "auto-stale"})
+                stale += 1
+            except Exception as e:
+                print(f"[dedupe-tasks] stale {survivor.get('id')}: {e}", flush=True)
+    remaining = len(open_tasks) - merged - stale
+    print(f"[dedupe-tasks] merged {merged} dups, closed {stale} stale, {remaining} open remain", flush=True)
+    return {"merged": merged, "stale_closed": stale, "open_remaining": remaining}
 
 
 def purge_bot_echo() -> dict:
