@@ -111,10 +111,11 @@ def ceo_summary() -> dict:
     return {"ok": sent > 0, "kind": "ceo_summary", "recipients": len(targets), "sent": sent}
 
 
-def _age_hours(created_at: str) -> float:
+def _age_hours(created_at: str, now: datetime | None = None) -> float:
     try:
         dt = datetime.fromisoformat((created_at or "").replace("Z", "+00:00"))
-        return (datetime.now(timezone.utc) - dt).total_seconds() / 3600
+        now = now or datetime.now(timezone.utc)
+        return (now - dt).total_seconds() / 3600
     except Exception:
         return 0.0
 
@@ -153,11 +154,61 @@ def weekly_report() -> dict:
     return {"ok": sent > 0, "kind": "weekly_report", "sent": sent}
 
 
+WEEKLY_DIGEST_SPACE = os.getenv("OPS_WEEKLY_DIGEST_SPACE", ALL_CAPTAINS)
+WEEK_HOURS = 24 * 7
+
+
+def _build_weekly_digest(tasks: list[dict], now: datetime | None = None) -> str:
+    """Deterministic per-room rollup of open tasks: per station, how many are open,
+    how many high-priority, how many opened in the last 7 days, plus up to 3 of the
+    high-priority titles. Rooms are ordered by high-priority then open count so the
+    busiest stations surface first. Kept pure (no I/O) so it is unit-testable."""
+    now = now or datetime.now(timezone.utc)
+    by_room: dict[str, dict] = {}
+    for t in tasks:
+        room = t.get("room_name") or "(unknown)"
+        r = by_room.setdefault(room, {"open": 0, "high": 0, "new": 0, "high_titles": []})
+        r["open"] += 1
+        ca = t.get("created_at")
+        if ca and _age_hours(ca, now) <= WEEK_HOURS:
+            r["new"] += 1
+        if t.get("priority") == "high":
+            r["high"] += 1
+            title = t.get("task_title") or t.get("task_text") or ""
+            if title and len(r["high_titles"]) < 3:
+                r["high_titles"].append(title)
+    if not by_room:
+        return "No open tasks this week — all clear. 🎉"
+    ordered = sorted(by_room.items(), key=lambda kv: (kv[1]["high"], kv[1]["open"]), reverse=True)
+    lines: list[str] = []
+    for room, r in ordered:
+        head = f"*{room}* — {r['open']} open"
+        if r["high"]:
+            head += f", {r['high']} high"
+        if r["new"]:
+            head += f", {r['new']} new this week"
+        lines.append(head)
+        for title in r["high_titles"]:
+            lines.append(f"  • {title}")
+    return "\n".join(lines)
+
+
+def weekly_digest() -> dict:
+    """Weekly — deterministic per-room digest of open work, posted to the captains
+    space. Complements weekly_report (the AI executive rollup DM'd to admins)."""
+    tasks = reports.open_tasks(limit=500)
+    text = _build_weekly_digest(tasks)
+    ok = chat_media.post_to_space(WEEKLY_DIGEST_SPACE, f"🗓️ *Weekly Per-Room Digest*\n{text}")
+    rooms = len({t.get("room_name") for t in tasks if t.get("room_name")})
+    return {"ok": ok, "kind": "weekly_digest", "rooms": rooms, "open_tasks": len(tasks)}
+
+
 JOBS = {
     "morning-digest": morning_digest,
     "urgent-reminder": urgent_reminder,
     "missing-reports": missing_reports,
     "ceo-summary": ceo_summary,
     "weekly-report": weekly_report,
+    "weekly-digest": weekly_digest,
     "escalation": escalation,
 }
