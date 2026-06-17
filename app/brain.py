@@ -557,15 +557,19 @@ def _call_claude(messages: list, tools: list | None) -> dict:
     raise RuntimeError("unreachable: claude retry loop exited without result")
 
 
-def _conv_id(space_id: str) -> str:
-    return (space_id or "dm").replace("/", "_")[:1400]
+def _conv_id(space_id: str, sender: str = "") -> str:
+    # Per-user within a space: in a shared room each captain keeps their own
+    # short-term thread, so one person's follow-up ("and the other one?") never
+    # pulls another person's turns (also avoids leaking one user's context).
+    raw = f"{space_id or 'dm'}|{(sender or '').lower()}"
+    return raw.replace("/", "_")[:1400]
 
 
-def _load_turns(space_id: str | None) -> list[dict]:
+def _load_turns(space_id: str | None, sender: str = "") -> list[dict]:
     if not space_id:
         return []
     try:
-        d = store.get("conversations", _conv_id(space_id))
+        d = store.get("conversations", _conv_id(space_id, sender))
         if d and d.get("turns"):
             return json.loads(d["turns"])
     except Exception:
@@ -573,12 +577,12 @@ def _load_turns(space_id: str | None) -> list[dict]:
     return []
 
 
-def _save_turn(space_id: str | None, user_text: str, assistant_text: str) -> None:
+def _save_turn(space_id: str | None, sender: str, user_text: str, assistant_text: str) -> None:
     if not space_id:
         return
     try:
-        cid = _conv_id(space_id)
-        turns = _load_turns(space_id)
+        cid = _conv_id(space_id, sender)
+        turns = _load_turns(space_id, sender)
         turns.append({"role": "user", "content": user_text[:2000]})
         turns.append({"role": "assistant", "content": assistant_text[:2000]})
         turns = turns[-6:]  # keep last 3 exchanges
@@ -611,8 +615,9 @@ def answer(user_msg: str, room_name: str | None, sender: str, is_admin: bool,
         f"---\nUser ({sender}{', admin' if is_admin else ''}) in "
         f"room '{room_name or 'DM'}' says:\n{user_msg}"
     )
-    # Prior turns give multi-turn continuity ("what about site 11?").
-    messages = _load_turns(space_id) + [{"role": "user", "content": user_block}]
+    # Prior turns give multi-turn continuity ("what about site 11?"), scoped to
+    # this user so a shared room doesn't cross-contaminate threads.
+    messages = _load_turns(space_id, sender) + [{"role": "user", "content": user_block}]
     # Everyone gets read tools; only admins can mutate tasks.
     tools = _READ_TOOLS + (_ACTION_TOOLS if is_admin else [])
     try:
@@ -629,7 +634,7 @@ def answer(user_msg: str, room_name: str | None, sender: str, is_admin: bool,
                 continue
             text = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text").strip()
             if text:
-                _save_turn(space_id, user_msg, text)
+                _save_turn(space_id, sender, user_msg, text)
             return text or None
         return None
     except urllib.error.HTTPError as e:
