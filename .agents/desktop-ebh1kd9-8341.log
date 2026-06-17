@@ -18,3 +18,5 @@
 2026-06-17T16:23:09Z heartbeat (desktop-ebh1kd9-8341)
 2026-06-17T16:25:48Z ready for review: feat/dashboard-reconcile-scorecard__desktop-ebh1kd9-8341 (fuel-reconcile + store-scorecard dashboard sections in reports.py, 7 tests, suite 244 green)
 2026-06-17T16:25:49Z heartbeat (desktop-ebh1kd9-8341)
+2026-06-17T16:28:05Z ready for review: feat/veeder-ocr__desktop-ebh1kd9-8341 (Veeder-Root tank-gauge OCR: per-tank parsing, veeder_gallons backfill, high-water alert, 13 tests, suite 267 green)
+2026-06-17T16:28:06Z heartbeat (desktop-ebh1kd9-8341)
