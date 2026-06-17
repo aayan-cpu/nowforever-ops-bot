@@ -340,13 +340,43 @@ def should_reply(event: dict, c_priority: str | None = None) -> bool:
     return ("nowforever" in text or "ops bot" in text or "@now" in text)
 
 
+# Bare read-only command keywords the bot understands. Typed on their own these
+# must always do something real (for admins) or route to the brain / a helpful
+# hint — NEVER a blank "Got it." ack. Early logs showed "report"/"reports" (and
+# "alerts" for non-admins) dead-acking because they matched no handler here.
+# "report"/"reports" are treated as synonyms for the ops summary/dashboard.
+_SUMMARY_CMDS = {"summary", "dashboard", "what happened", "what happened today",
+                 "status", "report", "reports", "overview", "recap"}
+_ALERT_CMDS = {"alerts", "alert", "urgent", "urgents", "high priority"}
+_TASK_CMDS = {"tasks", "open tasks", "task list", "list tasks", "open items"}
+_READ_ONLY_CMDS = _SUMMARY_CMDS | _ALERT_CMDS | _TASK_CMDS
+
+_BOT_MENTION_RE = re.compile(
+    r"(?i)@?\s*now\s*(and|&)?\s*forever(\s*ops\s*bot)?|@?\s*ops\s*bot")
+
+
+def _strip_bot_mention(text: str) -> str:
+    """Drop a leading bot mention: 'NowForever Ops Bot tasks' -> 'tasks'."""
+    return _BOT_MENTION_RE.sub("", text or "").strip()
+
+
+def _command_word(text: str) -> str:
+    """Normalize a message to its bare command form for keyword matching."""
+    return _strip_bot_mention(text).lower().strip(" :,.!?")
+
+
+def is_readonly_command(text: str) -> bool:
+    """True if the whole message is one of the recognized read-only keywords."""
+    return _command_word(text) in _READ_ONLY_CMDS
+
+
 def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> str | None:
     """Return a reply for an EXACT command, or None for anything conversational
     (so the caller routes it to the AI brain). Commands must be the whole message
     — a sentence that merely contains 'task'/'summary' is not a command."""
     text = msg["message"] or ""
     # Strip a leading bot mention: "NowForever Ops Bot tasks" -> "tasks".
-    norm = re.sub(r"(?i)@?\s*now\s*(and|&)?\s*forever(\s*ops\s*bot)?|@?\s*ops\s*bot", "", text).strip()
+    norm = _strip_bot_mention(text)
     low = norm.lower().strip(" :,.!?")
     admin = is_admin(msg["sender"])
 
@@ -368,7 +398,7 @@ def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> st
         return f"Assigned #{tid} to {assignee}." if res.get("ok") else f"Could not assign #{tid}: {res.get('error')}"
 
     # Quick read-only commands — only when the message IS the command.
-    if low in {"summary", "dashboard", "what happened", "what happened today", "status"}:
+    if low in _SUMMARY_CMDS:
         if not admin:
             return None  # let the AI answer non-admins instead of refusing
         d = dashboard(db_path)
@@ -380,7 +410,7 @@ def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> st
             lines.append(f"• {r['room_name']}: {r['tasks']} tasks, {r['high']} high")
         return "\n".join(lines)
 
-    if low in {"alerts", "alert", "urgent", "urgents", "high priority"}:
+    if low in _ALERT_CMDS:
         if not admin:
             return None
         alerts = high_priority(db_path, 8)
@@ -389,7 +419,7 @@ def build_reply(msg: dict, c, task_id: int | None, db_path: str = DB_PATH) -> st
         return "\n".join(["🚨 High Priority Alerts"] +
                          [f"• [{a['room_name']}] {(a.get('message') or '')[:160]}" for a in alerts])
 
-    if low in {"tasks", "open tasks", "task list", "list tasks", "open items"}:
+    if low in _TASK_CMDS:
         if not admin:
             return None
         tasks = open_tasks(db_path, limit=10)
@@ -409,6 +439,12 @@ def default_ack(msg: dict, c, task_id: int | None) -> str:
         return f"{icon} Logged {c.priority} task #{task_id}\nSite/room: {msg['room_name']}\nCategory: {pick_primary_category(c.categories)}\nAssignee: {c.assigned_hint or 'unassigned'}"
     if c.priority == "high":
         return f"🚨 High-priority message detected in {msg['room_name']}. I logged it for review."
+    # A bare recognized keyword (e.g. "report", "alerts") that reached here was
+    # gated to non-admins or hit while the brain was offline — guide the user
+    # instead of a blank "Got it." that looks like the command was ignored.
+    if is_readonly_command(msg.get("message", "")):
+        return ("I can show you: *summary* (ops overview), *alerts* (high-priority "
+                "items), or *tasks* (open items). Some commands are admin-only.")
     return "Got it."
 
 
