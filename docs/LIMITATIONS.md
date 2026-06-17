@@ -27,19 +27,11 @@ The development machine runs Python 3.14, which breaks several packages due to C
 
 ## 2. SQLite Ephemeral Storage on Cloud Run
 
-**Severity: High (production impact)**
+**Severity: Resolved**
 
-Cloud Run is a stateless serverless platform. Containers are spun up and torn down automatically. The SQLite database stored at `data/ops_bot.sqlite3` is part of the container's writable layer and will be lost when:
-- A new container instance starts (scale-out)
-- A new deployment is made
-- The container is replaced due to a health check failure
+This was resolved by moving live persistence to **Cloud Firestore** (via REST in `app/store.py`). Live tasks and messages are now stored in Firestore and survive container restarts, scale-out, and redeploys.
 
-**Current workaround:** The `OPS_DB_PATH` environment variable can be set to a path on a mounted Cloud Storage FUSE volume. This requires additional setup.
-
-**Long-term fix (Phase 3):** Migrate to a managed database:
-- **Cloud Firestore** (recommended) — serverless, scales automatically, no ops overhead
-- **Cloud SQL (PostgreSQL)** — if relational schema is needed
-- **Cloud Spanner** — overkill for this use case
+The SQLite database at `data/ops_bot.sqlite3` (`app/database.py`, `OPS_DB_PATH`) is now used **only** for the offline Google Vault ingest — it is not the live store, so its ephemerality on Cloud Run no longer affects production.
 
 ---
 
@@ -159,7 +151,7 @@ Only 5 of the 22+ rooms are mapped in the current code:
 
 Messages from unmapped rooms are stored with the Space ID as the site name, making them harder to query.
 
-**Fix (Phase 3):** Complete the `ROOM_MAPPINGS` dictionary in `app/room_mappings.py` for all 22+ rooms. See [ROOM_MAPPINGS.md](./ROOM_MAPPINGS.md) for the full list.
+**Fix (Phase 3):** Extend the canonical site registry (`_BASE_SITES`) in `app/sites.py` — or set the `OPS_SITES_EXTRA` env var — to cover all 22+ rooms. See [ROOM_MAPPINGS.md](./ROOM_MAPPINGS.md) for the full list. (Note: 9 stations are already registered; this is no longer just 5.)
 
 ---
 
@@ -204,7 +196,7 @@ All 22+ sites share a single bot, single database, and single dashboard. There i
 | # | Limitation | Severity | Phase to Fix |
 |---|---|---|---|
 | 1 | Python 3.14 compatibility | High | Use pyenv locally |
-| 2 | SQLite ephemeral on Cloud Run | High | Phase 3 (Firestore) |
+| 2 | SQLite ephemeral on Cloud Run | Resolved | Firestore is the live store; SQLite = offline ingest only |
 | 3 | No live message ingestion | High | Phase 2 |
 | 4 | No dashboard authentication | High | Phase 2/3 |
 | 5 | Webhook token not verified | High | Phase 2 |

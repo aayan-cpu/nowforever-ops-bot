@@ -8,7 +8,8 @@ This document tracks the mapping between Google Chat Space IDs and the physical 
 
 Google Chat identifies rooms by their **Space ID** (e.g., `AAAAayKiMyg`), not by their display name. When the bot receives a webhook event, it receives the Space ID. To show human-readable site names in the dashboard and alerts, the Space ID must be mapped to a site name.
 
-This mapping lives in `app/room_mappings.py` as a Python dictionary.
+This mapping is implemented in `app/sites.py` — the canonical site resolver (the
+list below is its source of truth).
 
 ---
 
@@ -58,39 +59,29 @@ Once the bot is deployed and added to a room, it receives the Space ID in every 
 
 ---
 
-## Room Mappings Python Code
+## Where this lives in code (`app/sites.py`)
 
-Copy this into `app/room_mappings.py` and fill in the TBD values:
+Site resolution is implemented in `app/sites.py`. Rather than a raw Space-ID → name
+dictionary, it resolves any free-form reference (a bare number `"11"`, a place
+`"Windchase"`, or a full room name `"11 N&F Windchase"`) to one canonical station,
+so reports and digests don't double-count a station referred to several ways.
+
+The station registry is `_BASE_SITES` (site number, canonical name, and alias
+words). Public API:
 
 ```python
-# app/room_mappings.py
-# Maps Google Chat Space IDs to human-readable site names
+from app import sites
 
-ROOM_MAPPINGS = {
-    # Confirmed mappings
-    "AAAAAyLVEg0": "11 N&F Windchase",
-    "AAAAayKiMyg": "4 Channelview",
-    "AAAAhO6H0_Y": "All Captains Chat",
-    "AAAA3s2JArA": "12 S Main Stafford",
-    "AAAAox_RoBo": "27 Fry",
-
-    # TODO: Add Space IDs for remaining sites
-    # "SPACE_ID_HERE": "1 Coastal Mart",
-    # "SPACE_ID_HERE": "9 Bissonnet",
-    # "SPACE_ID_HERE": "18 Harwin & Gessener",
-    # "SPACE_ID_HERE": "24 Galveston",
-    # "SPACE_ID_HERE": "29 Westheimer",
-}
-
-def get_site_name(space_id: str) -> str:
-    """Return site name for a given Space ID, or the Space ID itself if unknown."""
-    return ROOM_MAPPINGS.get(space_id, f"Unknown Site ({space_id})")
-
-def get_space_id(site_name: str) -> str | None:
-    """Return Space ID for a given site name, or None if not found."""
-    reverse = {v: k for k, v in ROOM_MAPPINGS.items()}
-    return reverse.get(site_name)
+sites.canonical_name("windchase")   # -> "11 N&F Windchase"
+sites.site_key("11 N&F Windchase")   # -> "11"   (stable grouping key)
+sites.same_site("11", "Windchase")   # -> True
+sites.is_station("All Captains Chat")  # -> False (company-wide room, not a station)
+sites.resolve("24 Galveston")          # -> {"number": 24, "name": "24 Galveston", "key": "24"}
 ```
+
+**To add a station:** add an entry to `_BASE_SITES` in `app/sites.py`, or — without a
+code change — set the `OPS_SITES_EXTRA` env var to a JSON array of
+`{"number": 7, "name": "7 Somewhere", "aliases": ["somewhere"]}`.
 
 ---
 
@@ -114,4 +105,4 @@ High priority rooms to map first (based on current open issues):
 
 ---
 
-*Update this file whenever a new Space ID is confirmed. Keep `app/room_mappings.py` in sync.*
+*Update this file whenever a new Space ID is confirmed. Keep the site registry in `app/sites.py` in sync.*

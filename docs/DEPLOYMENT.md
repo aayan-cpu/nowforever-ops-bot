@@ -79,7 +79,7 @@ You should get a JSON response with the current alert list.
 | Variable | Value | Description |
 |---|---|---|
 | `HOST` | `0.0.0.0` | Bind to all interfaces (required for Cloud Run) |
-| `OPS_DB_PATH` | `data/ops_bot.sqlite3` | Path to the SQLite database |
+| `OPS_DB_PATH` | `data/ops_bot.sqlite3` | Path to the offline Vault-ingest SQLite DB (live data uses Firestore, not this) |
 
 ---
 
@@ -139,7 +139,7 @@ Or view logs in the Google Cloud Console under Cloud Run > nowforever-chat-ops >
 
 ## Important Limitations
 
-- **SQLite is ephemeral on Cloud Run.** The database resets on each new container instance. See the Known Limitations section in the main README for workarounds.
+- **Live data lives in Firestore, not SQLite.** Live tasks/messages are persisted to Cloud Firestore via REST (`app/store.py`), so they survive container restarts. The SQLite DB at `OPS_DB_PATH` (`app/database.py`) is used **only** for the offline Google Vault ingest and is not the live store — its ephemerality on Cloud Run does not affect live operation.
 - **The service is publicly accessible.** No authentication is currently configured on the dashboard and API endpoints.
 - **Single region only.** No redundancy or failover.
 
