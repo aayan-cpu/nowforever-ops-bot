@@ -471,16 +471,15 @@ def store_room_spaces() -> list:
 
 
 def store_chat_spaces() -> list:
-    """Rooms a broadcast posts to. PREFERS the Chat API spaces.list — every room the
-    bot is a member of, *including ones that have been quiet* (so we don't miss a
-    store just because it hasn't posted lately). Falls back to message-derived
-    station rooms only if the API is unavailable (which also excludes DM/test junk)."""
-    from app import chat_media
+    """STATION rooms a store broadcast posts to. PREFERS the Chat API spaces.list —
+    every room the bot is a member of, *including ones that have been quiet* (so we
+    don't miss a store just because it hasn't posted lately). Either way we keep only
+    actual stations — never the All-Captains room, Marketing, campus/communications
+    groups, DMs, or test junk (those are not stores)."""
+    from app import chat_media, sites
     live = chat_media.list_bot_spaces()
-    if live:
-        return live
-    from app import sites
-    return [(sp, rn) for sp, rn in store_room_spaces() if sites.is_station(rn)]
+    src = live if live else store_room_spaces()
+    return [(sp, rn) for sp, rn in src if sites.is_station(rn)]
 
 
 def _room_link(room_id: str = "", room_name: str = "", is_dm: bool = False) -> str:

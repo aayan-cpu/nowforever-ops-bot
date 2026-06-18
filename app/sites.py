@@ -47,6 +47,11 @@ _BASE_SITES: list[dict] = [
 _NON_STATION_NAMES = {
     "all captains chat",
     "summerbell campus communications group",
+    "marketing",
+    "offices",
+    "office",
+    "admin",
+    "test",
 }
 
 

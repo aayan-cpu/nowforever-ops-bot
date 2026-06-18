@@ -226,8 +226,11 @@ def report_status(messages: list[dict], as_of: str, overdue_days: int = OVERDUE_
             continue
         site = sites.canonical_name(rn)
         seen.add(site)
-        if _is_report(m):
-            day = _local_day(m.get("sent_at") or m.get("created_at") or m.get("timestamp_raw"))
+        # Only count reports from go-live onward, judged by REAL send time — so a
+        # station's "last report" reflects the era we actually track, not a 2024
+        # vault import that would read as "635 days ago".
+        if _is_report(m) and after_floor(m):
+            day = _local_day(issue_time(m))
             if day and day > last_report.get(site, ""):
                 last_report[site] = day
 

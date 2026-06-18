@@ -11,7 +11,13 @@ from __future__ import annotations
 import os
 from datetime import datetime, timezone
 
-from app import reports, chat_media, brain, store, reconcile
+from app import reports, chat_media, brain, store, reconcile, sites
+
+# The bot's own output prefixes/phrases — so its re-ingested announcements never
+# get surfaced as "open high-priority issues".
+_BOT_PREFIXES = ("📢", "📊", "⏰", "🚨", "📋", "🏪", "📘", "🌅", "✅")
+_BOT_PHRASES = ("Ops Bot is now LIVE", "is now LIVE", "Ops Briefing", "High Priority Alerts",
+                "Daily Summary", "Escalation —", "Stations missing", "testing is over")
 
 ESCALATE_HOURS = float(os.getenv("OPS_ESCALATE_HOURS", "36"))
 # Hard floor: alerts ONLY consider issues posted on/after this date. Set to the
@@ -26,8 +32,31 @@ ADMIN_DM = os.getenv("OPS_ADMIN_DM_SPACE", "spaces/6AxGNyAAAAE")  # aayan ↔ bo
 REPORT_REMINDER_SPACE = os.getenv("OPS_REPORT_REMINDER_SPACE", ALL_CAPTAINS)
 
 
+def _is_bot_echo_task(t: dict) -> bool:
+    """A task accidentally created from the bot's OWN re-ingested post (e.g. the
+    'now LIVE' announcement) — never a real store issue."""
+    txt = f"{t.get('task_title') or ''} {t.get('task_text') or ''}".strip()
+    return txt.startswith(_BOT_PREFIXES) or any(p in txt for p in _BOT_PHRASES)
+
+
 def _high_open_tasks(limit: int = 50) -> list[dict]:
-    return [t for t in reports.open_tasks(limit=limit) if t.get("priority") == "high"]
+    """High-priority open tasks for the digests — only REAL, CURRENT store issues:
+    exclude the bot's own echoes, non-station rooms (MARKETING, campus groups), and
+    pre-go-live imported backlog."""
+    out = []
+    for t in reports.open_tasks(limit=max(limit * 4, 300)):
+        if t.get("priority") != "high":
+            continue
+        if not sites.is_station(t.get("room_name")):
+            continue
+        if _is_bot_echo_task(t):
+            continue
+        if not _after_start(t):
+            continue
+        out.append(t)
+        if len(out) >= limit:
+            break
+    return out
 
 
 def _admin_dms() -> list[dict]:
@@ -69,21 +98,29 @@ def urgent_reminder() -> dict:
 
 
 def missing_reports() -> dict:
-    """Evening — DM the admin which stations have not posted a daily report today,
-    and call out any that are overdue (no report for several days)."""
-    status = reports.missing_daily_reports()
-    missing, overdue = status["missing"], status["overdue"]
-    if not missing:
-        ok = chat_media.post_to_space(ADMIN_DM, "✅ All stations have posted a daily report today.")
+    """DM the admin which stations are PAST their report cutoff with nothing posted.
+    Cutoff-aware on purpose: most stations don't file until the end of their shift, so
+    we only flag a station once its cutoff (end-of-shift, OPS_REPORT_CUTOFF / per-site
+    overrides) has passed — never mid-shift. Also calls out genuinely overdue stations
+    (no report in a while, counted only from go-live)."""
+    lateness = reports.daily_report_lateness()
+    missing = [m["site"] for m in lateness["missing_past_cutoff"]]
+    overdue = reports.missing_daily_reports()["overdue"]
+    if not missing and not overdue:
+        ok = chat_media.post_to_space(ADMIN_DM, "✅ All stations are on track with daily reports.")
         return {"ok": ok, "kind": "missing_reports", "missing": 0, "overdue": 0}
-    lines = ["📋 *Stations missing a daily report today:*"] + [f"• {r}" for r in missing]
+    lines = []
+    if missing:
+        lines.append("📋 *Past cutoff, still no report today:*")
+        lines += [f"• {r}" for r in missing]
     if overdue:
-        lines.append("")
+        if lines:
+            lines.append("")
         lines.append("⏰ *Overdue (no report in a while):*")
         for o in overdue:
-            last = o["last_report"] or "never"
-            since = f"{o['days_since']}d ago" if o["days_since"] is not None else "no report on record"
-            lines.append(f"• {o['site']} — last report {last} ({since})")
+            last = o["last_report"] or "no report since go-live"
+            since = f" ({o['days_since']}d ago)" if o["days_since"] is not None else ""
+            lines.append(f"• {o['site']} — {last}{since}")
     ok = chat_media.post_to_space(ADMIN_DM, "\n".join(lines))
     return {"ok": ok, "kind": "missing_reports", "missing": len(missing), "overdue": len(overdue)}
 

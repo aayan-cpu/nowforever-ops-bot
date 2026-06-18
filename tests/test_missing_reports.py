@@ -79,20 +79,26 @@ class ReportStatusTests(unittest.TestCase):
 
 
 class _PatchDigests:
-    """Patch the report lookup + chat poster digests uses; capture posts."""
+    """Patch the report lookups + chat poster digests uses; capture posts.
+    `lateness` supplies the cutoff-aware missing_past_cutoff list the (reframed)
+    missing_reports digest now relies on."""
 
-    def __init__(self, status):
+    def __init__(self, status, lateness=None):
         self.status = status
+        self.lateness = lateness or {"missing_past_cutoff": [], "late": [], "on_time": []}
         self.posts = []
 
     def __enter__(self):
-        self._orig = (reports.missing_daily_reports, digests.chat_media.post_to_space)
+        self._orig = (reports.missing_daily_reports, reports.daily_report_lateness,
+                      digests.chat_media.post_to_space)
         reports.missing_daily_reports = lambda *a, **k: self.status
+        reports.daily_report_lateness = lambda *a, **k: self.lateness
         digests.chat_media.post_to_space = lambda space, text: (self.posts.append((space, text)) or True)
         return self
 
     def __exit__(self, *a):
-        reports.missing_daily_reports, digests.chat_media.post_to_space = self._orig
+        (reports.missing_daily_reports, reports.daily_report_lateness,
+         digests.chat_media.post_to_space) = self._orig
 
 
 class ReminderJobTests(unittest.TestCase):
@@ -116,12 +122,23 @@ class ReminderJobTests(unittest.TestCase):
     def test_missing_reports_includes_overdue_block(self):
         status = {"missing": ["9 Bissonnet"],
                   "overdue": [{"site": "9 Bissonnet", "last_report": "2026-06-14", "days_since": 3}]}
-        with _PatchDigests(status) as p:
+        lateness = {"missing_past_cutoff": [{"site": "9 Bissonnet", "cutoff": "22:00"}],
+                    "late": [], "on_time": []}
+        with _PatchDigests(status, lateness) as p:
             res = digests.missing_reports()
         self.assertEqual(res["overdue"], 1)
         _, text = p.posts[0]
         self.assertIn("Overdue", text)
         self.assertIn("2026-06-14", text)
+
+    def test_missing_reports_quiet_before_cutoff(self):
+        # Stations that haven't filed but whose cutoff hasn't passed are NOT flagged
+        # (most file at end of shift) — only past-cutoff + overdue count.
+        status = {"missing": ["9 Bissonnet", "24 Galveston"], "overdue": []}
+        with _PatchDigests(status, {"missing_past_cutoff": []}) as p:
+            res = digests.missing_reports()
+        self.assertEqual(res["missing"], 0)
+        self.assertIn("on track", p.posts[0][1].lower())
 
 
 if __name__ == "__main__":

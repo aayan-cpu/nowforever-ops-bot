@@ -29,9 +29,10 @@ _API = "https://chat.googleapis.com/v1"
 BOT_USER_ID = os.getenv("OPS_BOT_USER_ID", "").strip()
 # Prefixes/phrases the bot uses in its own output — used to clean up self-echoes
 # that were ingested before the BOT filter existed.
-_BOT_PREFIXES = ("📢", "📊", "⏰", "🚨", "📋", "🏪", "📘")
-_BOT_PHRASES = ("Ops Bot is now LIVE", "Ops Briefing", "High Priority Alerts",
-                "Daily Summary", "Escalation —", "Stations missing")
+_BOT_PREFIXES = ("📢", "📊", "⏰", "🚨", "📋", "🏪", "📘", "🌅", "✅")
+_BOT_PHRASES = ("Ops Bot is now LIVE", "is now LIVE", "testing is over", "Ops Briefing",
+                "High Priority Alerts", "Daily Summary", "Escalation —", "Stations missing",
+                "AI assistant here to help")
 
 
 def _is_bot_message(sender_dict: dict) -> bool:
@@ -357,8 +358,15 @@ def purge_bot_echo() -> dict:
     re-ingested before the BOT filter existed, so they stop showing as alerts/tasks.
     Matches by bot user id and by the bot's output prefixes/phrases."""
     downgraded = 0
+    bot_msg_ids: set = set()
     for m in store.list_all("messages"):
         if m.get("is_duplicate"):
+            # already-downgraded bot echoes still count for closing their tasks
+            sender0 = m.get("sender") or ""
+            txt0 = (m.get("message") or "").strip()
+            if (BOT_USER_ID and sender0 == BOT_USER_ID) or txt0.startswith(_BOT_PREFIXES) \
+                    or any(p in txt0 for p in _BOT_PHRASES):
+                bot_msg_ids.add(m.get("id"))
             continue
         sender = m.get("sender") or ""
         txt = (m.get("message") or "").strip()
@@ -366,14 +374,30 @@ def purge_bot_echo() -> dict:
             or txt.startswith(_BOT_PREFIXES) \
             or any(p in txt for p in _BOT_PHRASES)
         if is_bot:
+            bot_msg_ids.add(m.get("id"))
             try:
                 store.patch("messages", m["id"],
                             {"is_duplicate": True, "priority": "normal", "is_task": False})
                 downgraded += 1
             except Exception as e:
                 print(f"[purge] {m.get('id')}: {e}", flush=True)
-    print(f"[purge] downgraded {downgraded} bot-echo messages", flush=True)
-    return {"downgraded": downgraded}
+    # Close any OPEN tasks spawned from the bot's own posts (e.g. the 'now LIVE'
+    # announcement that showed up as a high-priority issue). Match by source
+    # message id, and by the bot's own phrases in the task text.
+    closed = 0
+    for t in store.list_all("tasks"):
+        if (t.get("status") or "open") != "open":
+            continue
+        txt = f"{t.get('task_title') or ''} {t.get('task_text') or ''}".strip()
+        if t.get("message_id") in bot_msg_ids or txt.startswith(_BOT_PREFIXES) \
+                or any(p in txt for p in _BOT_PHRASES):
+            try:
+                store.patch("tasks", t["id"], {"status": "closed", "closed_reason": "bot-echo"})
+                closed += 1
+            except Exception as e:
+                print(f"[purge] task {t.get('id')}: {e}", flush=True)
+    print(f"[purge] downgraded {downgraded} bot-echo messages, closed {closed} bot-echo tasks", flush=True)
+    return {"downgraded": downgraded, "tasks_closed": closed}
 
 
 def remap_space_ids() -> dict:
