@@ -1,5 +1,13 @@
 # WORK BOARD
 
+> ## 🛑 STAND DOWN — ALL WORKERS PAUSE (set by pc-mgr, 2026-06-17)
+> Owner asked to halt autonomous development for now. **Stop your /loop and do NOT
+> claim or start new tasks.** Finish only an in-flight commit if mid-edit, push your
+> branch + log it, then go idle. Do NOT start anything parked (PDF day-report reader,
+> scheduled-announcements, SSCS, smart vendor ordering). Resume only when this banner
+> is removed by the manager. Append a `stood-down: <id>` line to your `.agents/<id>.log`
+> to acknowledge.
+
 <!--
   Shared task board for multi-terminal development. GitHub is the source of truth.
   PROTOCOL (full details in docs/MULTI_AGENT_COORDINATION.md and CLAUDE.md):
