@@ -116,10 +116,43 @@ def open_tasks(db_path: str | None = None, room: str | None = None, limit: int =
     return tasks[:limit]
 
 
+def issue_time(item: dict) -> str:
+    """The REAL time an issue was posted: the captain's send time, never the bot's
+    logging time. sent_at → timestamp_raw (actual Chat createTime) → created_at last.
+    created_at is when the sync LOGGED it (often days/years after the fact for the
+    imported backlog), so it must never win — that's what made old issues look new."""
+    return item.get("sent_at") or item.get("timestamp_raw") or item.get("created_at") or ""
+
+
+_ISSUE_FLOOR = os.getenv("OPS_ALERT_START", "").strip()
+
+
+def after_floor(item: dict) -> bool:
+    """True if the issue was posted on/after OPS_ALERT_START, judged by its REAL send
+    time (issue_time), so pre-go-live imported backlog (2023-2025) stops surfacing as
+    a current alert. No floor set, or unparseable time → passes (fail open)."""
+    if not _ISSUE_FLOOR:
+        return True
+    try:
+        start = datetime.fromisoformat(_ISSUE_FLOOR.replace("Z", "+00:00"))
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        ts = issue_time(item)
+        if not ts:
+            return True
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt >= start
+    except Exception:
+        return True
+
+
 def high_priority(db_path: str | None = None, limit: int = 50) -> list[dict]:
     rows = [m for m in store.list_all("messages")
             if m.get("priority") == "high" and not m.get("is_duplicate")
-            and not m.get("is_dm")]  # DMs to the bot are commands, not store alerts
+            and not m.get("is_dm")  # DMs to the bot are commands, not store alerts
+            and after_floor(m)]      # drop pre-go-live imported backlog
     return _sort_recent(rows)[:limit]
 
 

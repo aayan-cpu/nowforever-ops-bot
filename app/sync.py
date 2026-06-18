@@ -272,6 +272,37 @@ def clear_dm_tasks() -> dict:
     return {"messages_downgraded": downgraded, "dm_tasks_closed": closed}
 
 
+def backfill_send_times() -> dict:
+    """Repair the 'first reported' time. Most imported messages have an empty
+    sent_at, so displays fell back to created_at (the bot's LOGGING time) and made
+    old issues look like they happened today. Set sent_at from the message's real
+    timestamp_raw, and copy that onto each task from its source message."""
+    msg_ts: dict = {}   # message_id -> real send time
+    fixed_msgs = 0
+    for m in store.list_all("messages"):
+        real = m.get("timestamp_raw") or m.get("created_at") or ""
+        msg_ts[m.get("id")] = m.get("sent_at") or real
+        if not m.get("sent_at") and real:
+            try:
+                store.patch("messages", m["id"], {"sent_at": store.normalize_ts(real)})
+                fixed_msgs += 1
+            except Exception as e:
+                print(f"[backfill-ts] msg {m.get('id')}: {e}", flush=True)
+    fixed_tasks = 0
+    for t in store.list_all("tasks"):
+        if t.get("sent_at"):
+            continue
+        src = msg_ts.get(t.get("message_id"))
+        if src:
+            try:
+                store.patch("tasks", t["id"], {"sent_at": store.normalize_ts(src)})
+                fixed_tasks += 1
+            except Exception as e:
+                print(f"[backfill-ts] task {t.get('id')}: {e}", flush=True)
+    print(f"[backfill-ts] fixed {fixed_msgs} msgs, {fixed_tasks} tasks", flush=True)
+    return {"messages_fixed": fixed_msgs, "tasks_fixed": fixed_tasks}
+
+
 def dedupe_tasks(stale_days: int = 14) -> dict:
     """Collapse the historical task backlog into one live issue per (store, category).
     The bulk sync created a task for every action-worthy message, so the same problem

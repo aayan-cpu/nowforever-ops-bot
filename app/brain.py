@@ -103,6 +103,13 @@ PERSONA = (
     "answering. For store questions you MUST call lookup_site (the OPS DATA sample is "
     "incomplete per store — never answer from it alone or say 'the rest isn't broken out'). "
     "No links needed — just the timestamp.\n"
+    "- TIMING — the 'first reported' time from the tools IS the captain's actual send time; "
+    "state it exactly as given. Do NOT invent relative phrasing ('tonight', 'earlier today', "
+    "'this morning') from your own clock — an issue first reported days ago is NOT 'today'. If "
+    "you quote a captain's words like 'since 11:30 PM', attribute them ('the captain said since "
+    "11:30 PM'), don't assert it as a verified time. lookup_site returns only CURRENT issues "
+    "(since go-live); if it says there are none, the store has no live issues — say so rather "
+    "than digging up old imported history.\n"
     "- CONSOLIDATE — when you list issues/alerts, group every message about the SAME problem "
     "at the SAME store into ONE issue. Captains send a flurry about one thing ('pumps not "
     "working', 'I reset it', 'still not working', 'do you see the power outside?') — that is "
@@ -620,7 +627,7 @@ def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> st
             hits = sorted(hits, key=lambda m: (m.get("seq") or 0, m.get("created_at") or ""), reverse=True)[:15]
             out = []
             for m in hits:
-                when = reports.fmt_ts(m.get("sent_at") or m.get("created_at") or m.get("timestamp_raw"))
+                when = reports.fmt_ts(reports.issue_time(m))
                 out.append(f"[{m.get('room_name')}] {m.get('sender')} ({when}): "
                            f"{(m.get('message') or '')[:160]}")
             return "\n".join(out)
@@ -657,10 +664,15 @@ def _run_tool(name: str, args: dict, sender: str = "", space_id: str = "") -> st
             if not s:
                 return f"No data found for site '{args.get('site')}'."
             out = [f"{s['room_name']}: {s['messages']} msgs, {s['tasks']} task-msgs, {s['high']} high-priority."]
-            for t in rs.get("open_tasks", [])[:12]:
-                when = reports.fmt_ts(t.get("sent_at") or t.get("created_at"))
+            # Only CURRENT issues (posted on/after the go-live floor) — judged by real
+            # send time, so years-old imported backlog isn't presented as live.
+            current = [t for t in rs.get("open_tasks", []) if reports.after_floor(t)]
+            for t in current[:12]:
+                when = reports.fmt_ts(reports.issue_time(t))
                 out.append(f"#{t['id']} ({t.get('priority')}) {t.get('task_title') or t.get('task_text')}"
                            + (f"  — first reported {when}" if when else ""))
+            if not current:
+                out.append("(no current open issues since go-live; older imported items hidden)")
             return "\n".join(out)
         if name == "close_task":
             r = reports.task_action(None, int(args["task_id"]), "close")
@@ -761,7 +773,7 @@ def consolidate_alerts(db_path: str | None = None, limit: int = 60) -> str | Non
     # Oldest first so the model sees how each issue evolved over the thread.
     feed_lines = []
     for m in reversed(rows):
-        ts = reports.fmt_ts(m.get("sent_at") or m.get("created_at") or m.get("timestamp_raw"))
+        ts = reports.fmt_ts(reports.issue_time(m))
         who = m.get("sender") or "?"
         feed_lines.append(f"[{ts}] [{m.get('room_name') or '?'}] {who}: "
                           f"{(m.get('message') or '')[:200]}")

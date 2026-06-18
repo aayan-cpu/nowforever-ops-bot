@@ -327,6 +327,13 @@ def dedupe_tasks() -> dict:
     return {"ok": True, "kind": "dedupe_tasks", **sync.dedupe_tasks()}
 
 
+def backfill_send_times() -> dict:
+    """Set sent_at from each message/task's real timestamp so 'first reported' shows
+    the captain's send time, not the bot's logging time (one-time data repair)."""
+    from app import sync
+    return {"ok": True, "kind": "backfill_send_times", **sync.backfill_send_times()}
+
+
 def gas_report_reminder() -> dict:
     """Daily reminder broadcast to every store chat to send the gas/day report.
     Message is editable via OPS_GAS_REPORT_MSG."""
@@ -346,6 +353,7 @@ JOBS = {
     "clear-dr-alerts": clear_dr_alerts,
     "clear-dm-tasks": clear_dm_tasks,
     "dedupe-tasks": dedupe_tasks,
+    "backfill-send-times": backfill_send_times,
     "backfill-dms": backfill_dms,
     "gas-report-reminder": gas_report_reminder,
     "morning-digest": morning_digest,

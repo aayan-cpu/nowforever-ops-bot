@@ -413,7 +413,9 @@ def ingest_live_event(event: dict, db_path: str = DB_PATH, analyze: bool = True)
                 "dedupe_key": c.dedupe_key,
                 # created_at = when we logged it; sent_at = when the captain posted
                 # the originating message (for late/overdue/by-cutoff reasoning).
-                "sent_at": msg["sent_at"],
+                # Fall back to timestamp_raw so it's never empty — otherwise
+                # "first reported" wrongly shows the logging time.
+                "sent_at": msg.get("sent_at") or msg.get("timestamp_raw"),
                 "confidence": c.confidence, "created_at": now, "updated_at": now,
             }, doc_id=str(task_id))
 
