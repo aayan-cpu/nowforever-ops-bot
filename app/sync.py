@@ -277,17 +277,15 @@ def backfill_send_times() -> dict:
     sent_at, so displays fell back to created_at (the bot's LOGGING time) and made
     old issues look like they happened today. Set sent_at from the message's real
     timestamp_raw, and copy that onto each task from its source message."""
-    msg_ts: dict = {}   # message_id -> real send time
-    fixed_msgs = 0
+    # Build message_id -> real send time (read-only). timestamp_raw is the message's
+    # own time; created_at is the logging time (last resort).
+    msg_ts: dict = {}
     for m in store.list_all("messages"):
-        real = m.get("timestamp_raw") or m.get("created_at") or ""
-        msg_ts[m.get("id")] = m.get("sent_at") or real
-        if not m.get("sent_at") and real:
-            try:
-                store.patch("messages", m["id"], {"sent_at": store.normalize_ts(real)})
-                fixed_msgs += 1
-            except Exception as e:
-                print(f"[backfill-ts] msg {m.get('id')}: {e}", flush=True)
+        msg_ts[m.get("id")] = m.get("sent_at") or m.get("timestamp_raw") or m.get("created_at") or ""
+
+    # TASKS FIRST — they have no timestamp_raw, so lookup_site can't floor them until
+    # sent_at is repaired. This is the part that fixes "first reported"; do it before
+    # the slow message pass so a request timeout can't starve it.
     fixed_tasks = 0
     for t in store.list_all("tasks"):
         if t.get("sent_at"):
@@ -299,8 +297,24 @@ def backfill_send_times() -> dict:
                 fixed_tasks += 1
             except Exception as e:
                 print(f"[backfill-ts] task {t.get('id')}: {e}", flush=True)
-    print(f"[backfill-ts] fixed {fixed_msgs} msgs, {fixed_tasks} tasks", flush=True)
-    return {"messages_fixed": fixed_msgs, "tasks_fixed": fixed_tasks}
+
+    # Messages second — cosmetic (high_priority already floors on timestamp_raw).
+    # Capped so the request returns; re-run to continue (idempotent, skips fixed).
+    fixed_msgs = 0
+    for m in store.list_all("messages"):
+        if m.get("sent_at"):
+            continue
+        real = m.get("timestamp_raw") or m.get("created_at") or ""
+        if real:
+            try:
+                store.patch("messages", m["id"], {"sent_at": store.normalize_ts(real)})
+                fixed_msgs += 1
+            except Exception as e:
+                print(f"[backfill-ts] msg {m.get('id')}: {e}", flush=True)
+            if fixed_msgs >= 4000:  # stay under the request timeout; re-run for the rest
+                break
+    print(f"[backfill-ts] fixed {fixed_tasks} tasks, {fixed_msgs} msgs", flush=True)
+    return {"tasks_fixed": fixed_tasks, "messages_fixed": fixed_msgs}
 
 
 def dedupe_tasks(stale_days: int = 14) -> dict:
