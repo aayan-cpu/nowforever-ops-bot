@@ -42,3 +42,5 @@
 2026-06-17T23:31:09Z heartbeat (desktop-ebh1kd9-8341)
 2026-06-18T00:02:09Z heartbeat (desktop-ebh1kd9-8341)
 2026-06-18T00:33:09Z heartbeat (desktop-ebh1kd9-8341)
+2026-06-18T00:33:18Z status (desktop-ebh1kd9-8341): STAND DOWN acknowledged (manager commit ba8d3df — owner halted autonomous dev). Pausing, no new tasks. No open branches.
+2026-06-18T00:33:18Z heartbeat (desktop-ebh1kd9-8341)
